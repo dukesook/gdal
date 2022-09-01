@@ -79,6 +79,11 @@ class GDALHEIFDataset final: public GDALPamDataset
 
         static int Identify(GDALOpenInfo* poOpenInfo);
         static GDALDataset* Open(GDALOpenInfo* poOpenInfo);
+        static GDALDataset *CreateCopy( const char *pszFilename,
+                                GDALDataset *poSrcDS,
+                                int bStrict, char ** papszOptions,
+                                GDALProgressFunc pfnProgress,
+                                void *pProgressData );
 };
 
 /************************************************************************/
@@ -353,6 +358,151 @@ bool GDALHEIFDataset::Init(GDALOpenInfo* poOpenInfo)
     TryLoadXML( poOpenInfo->GetSiblingFiles() );
 
     return true;
+}
+
+/************************************************************************/
+/*                              CreateCopy()                            */
+/************************************************************************/
+
+GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
+                        GDALDataset *poSrcDS,
+                        int bStrict, char ** papszOptions,
+                        GDALProgressFunc pfnProgress,
+                        void *pProgressData )
+{
+
+    // Create the dataset.
+    VSILFILE *fpImage = nullptr;
+    fpImage = VSIFOpenL(pszFilename, "wb");
+    if( fpImage == nullptr )
+    {
+        CPLError(CE_Failure, CPLE_OpenFailed,
+                 "Unable to create jpeg file %s.\n",
+                 pszFilename);
+        return nullptr;
+    }
+
+    const int nXSize = poSrcDS->GetRasterXSize();
+    const int nYSize = poSrcDS->GetRasterYSize();
+    enum heif_colorspace colorspace = heif_colorspace_RGB;
+    enum heif_chroma chroma = heif_chroma_interleaved_RGB;
+    heif_image* output_image;
+    heif_error error = heif_image_create(nXSize, nYSize, colorspace, chroma, &output_image);
+    if (error.code) {
+        printf("heif_image_create() error: %s\n", error.message);
+    }
+
+    //TODO - don't assume interleaved
+    enum heif_channel channel = heif_channel_interleaved;
+
+    GDALDataType eDT = poSrcDS->GetRasterBand(1)->GetRasterDataType();
+    int bit_depth = 8;
+    switch (eDT) {
+        case GDT_Byte:
+            bit_depth = 8; break;
+        case GDT_UInt16:
+            bit_depth = 16; break;
+        case GDT_Int16:
+            bit_depth = 8; break;
+        case GDT_UInt32:
+            bit_depth = 32; break;
+        case GDT_Int32:
+            bit_depth = 32; break;
+        case GDT_UInt64:
+            bit_depth = 64; break;
+        case GDT_Int64:
+            bit_depth = 64; break;
+        case GDT_Float32:
+            bit_depth = 32; break;
+        case GDT_Float64:
+            bit_depth = 64; break;
+        case GDT_CInt16:
+            bit_depth = 16; break;
+        case GDT_CInt32:
+            bit_depth = 32; break;
+        case GDT_CFloat32:
+            bit_depth = 23; break;
+        case GDT_CFloat64:
+            bit_depth = 64; break;
+        case GDT_TypeCount:
+            bit_depth = 8; break; //?
+        case GDT_Unknown:
+            bit_depth = 8; break;
+    }
+    if (eDT != GDT_Byte) {
+        printf("WARNING! - Input image is 8-bit unsigned integer\n");
+    }
+    heif_image_add_plane(output_image, channel, nXSize, nYSize, bit_depth);
+
+    int stride = 0;
+    uint8_t* data = heif_image_get_plane(output_image, channel, &stride);
+
+    //NITF File
+    //GDALDataset *poSrcDS
+    Bands bands = poSrcDS->GetBands();
+    printf("Band Count: %lu\n", bands.size());
+
+
+    const int nWorkDTSize = GDALGetDataTypeSizeBytes(eDT);
+    const int nBands = poSrcDS->GetRasterCount();
+    size_t data_size = nBands * nXSize * nWorkDTSize;
+    GByte* pData =  static_cast<GByte *>(CPLMalloc(data_size));
+    GSpacing nPixelSpace = nBands * nWorkDTSize; //you can use 0 to default to eBufType
+    GSpacing nLineSpace = nBands * nXSize * nWorkDTSize; //Can be 0 to use default value
+    GSpacing nBandSpace = nWorkDTSize;
+    GDALRasterIOExtraArg* psExtraArg = nullptr;
+
+    CPLErr eErr = CE_None;
+
+    for (int iLine = 0; iLine < nYSize; iLine++) {
+        eErr = poSrcDS->RasterIO( 
+            GF_Read,
+            0,          //x offset - start at the beginning of each row
+            iLine,          //y offset - row number
+            nXSize,     //Image width
+            1,          //Row thickness - Copy 1 row at a time
+            pData,      //Output data
+            nXSize,     //
+            1,          //
+            eDT,        //Pixel Size
+            nBands,     //band count
+            nullptr,    //order bands
+            nPixelSpace,//Bytes / pixel
+            nLineSpace, //Butes / row
+            nBandSpace,
+            psExtraArg);
+
+        if (eErr != CE_None) {
+            printf("ERROR: %d\n", eErr);
+            break;
+        }
+
+        //Write Pixels
+
+        uint32_t byte_width = nXSize * nBands;
+        for (uint32_t i = 0; i < byte_width; i++) {
+            int source_index = i + (iLine * byte_width);
+            data[source_index] = pData[i];
+        }
+    }
+
+
+
+
+
+    //ENCODE
+    heif_encoder* encoder;
+    heif_image_handle* handle;
+    heif_context* ctx2 = heif_context_alloc(); //You need a separate context
+    heif_context_get_encoder_for_format(ctx2, heif_compression_HEVC, &encoder);
+    heif_context_encode_image(ctx2, output_image, encoder, nullptr, &handle);
+
+    //WRITE
+    heif_context_write_to_file(ctx2, pszFilename);
+    printf("Created: %s\n", pszFilename);
+
+
+    return nullptr;
 }
 
 /************************************************************************/
@@ -685,6 +835,7 @@ void GDALRegister_HEIF()
 
     poDriver->pfnOpen = GDALHEIFDataset::Open;
     poDriver->pfnIdentify = GDALHEIFDataset::Identify;
+    poDriver->pfnCreateCopy = GDALHEIFDataset::CreateCopy;
 
     poDriver->SetMetadataItem("LIBHEIF_VERSION", LIBHEIF_VERSION);
 
