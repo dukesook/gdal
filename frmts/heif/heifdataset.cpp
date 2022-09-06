@@ -384,16 +384,25 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
 
     const int nXSize = poSrcDS->GetRasterXSize();
     const int nYSize = poSrcDS->GetRasterYSize();
+
+    const int nBands = poSrcDS->GetRasterCount();
     enum heif_colorspace colorspace = heif_colorspace_RGB;
     enum heif_chroma chroma = heif_chroma_interleaved_RGB;
+    enum heif_channel channel = heif_channel_interleaved;
+
+    if (nBands == 1) {
+        printf("monochrome!\n");
+        colorspace = heif_colorspace_monochrome;
+        chroma = heif_chroma_monochrome;
+        channel = heif_channel_Y;
+    }
+
     heif_image* output_image;
     heif_error error = heif_image_create(nXSize, nYSize, colorspace, chroma, &output_image);
     if (error.code) {
         printf("heif_image_create() error: %s\n", error.message);
     }
 
-    //TODO - don't assume interleaved
-    enum heif_channel channel = heif_channel_interleaved;
 
     GDALDataType eDT = poSrcDS->GetRasterBand(1)->GetRasterDataType();
     int bit_depth = 8;
@@ -444,7 +453,6 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
 
 
     const int nWorkDTSize = GDALGetDataTypeSizeBytes(eDT);
-    const int nBands = poSrcDS->GetRasterCount();
     size_t data_size = nBands * nXSize * nWorkDTSize;
     GByte* pData =  static_cast<GByte *>(CPLMalloc(data_size));
     GSpacing nPixelSpace = nBands * nWorkDTSize; //you can use 0 to default to eBufType
@@ -479,9 +487,9 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
 
         //Write Pixels
 
-        uint32_t byte_width = nXSize * nBands;
-        for (uint32_t i = 0; i < byte_width; i++) {
-            int source_index = i + (iLine * byte_width);
+        // uint32_t byte_width = nXSize * nBands;
+        for (uint32_t i = 0; i < nLineSpace; i++) {
+            int source_index = i + (iLine * nLineSpace);
             data[source_index] = pData[i];
         }
     }
@@ -490,15 +498,15 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
 
 
 
-    //ENCODE
+    //Encode Image
     heif_encoder* encoder;
     heif_image_handle* handle;
-    heif_context* ctx2 = heif_context_alloc(); //You need a separate context
-    heif_context_get_encoder_for_format(ctx2, heif_compression_HEVC, &encoder);
-    heif_context_encode_image(ctx2, output_image, encoder, nullptr, &handle);
+    heif_context* context = heif_context_alloc(); //You need a separate context
+    heif_context_get_encoder_for_format(context, heif_compression_HEVC, &encoder);
+    heif_context_encode_image(context, output_image, encoder, nullptr, &handle);
 
-    //WRITE
-    heif_context_write_to_file(ctx2, pszFilename);
+    //Write Image
+    heif_context_write_to_file(context, pszFilename);
     printf("Created: %s\n", pszFilename);
 
 
