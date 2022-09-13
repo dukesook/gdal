@@ -360,11 +360,25 @@ bool GDALHEIFDataset::Init(GDALOpenInfo* poOpenInfo)
     return true;
 }
 
+
+void print_metadata(GDALDataset *poSrcDS);
+heif_image* get_band(GDALRasterBand* band, const char* pszFilename);
+void print_item(GDALDataset *poSrcDS, const char* key, const char* domain);
 /************************************************************************/
 /*                              CreateCopy()                            */
 /************************************************************************/
-void print_metadata(GDALDataset *poSrcDS);
-heif_image* get_band(GDALRasterBand* band, const char* pszFilename);
+void print_item(GDALDataset *poSrcDS, const char* key, const char* domain) {
+    const char* value = poSrcDS->GetMetadataItem(key, domain);
+    if (value != nullptr) {
+        size_t length = strlen(value);
+        if (length != 0)
+            printf("\t\t%s: %s\n", key, value);
+
+    } else {
+        printf("\t\tKey %s not found\n", key);
+    }
+}
+
 void print_metadata(GDALDataset *poSrcDS) {
     char** domain_list = poSrcDS->GetMetadataDomainList();
 
@@ -372,19 +386,26 @@ void print_metadata(GDALDataset *poSrcDS) {
     int i = 1;
     while (*domain_list != NULL) {
         printf("\t%d. %s\n", i++, *domain_list);
-
-
         char** metadata = poSrcDS->GetMetadata(*domain_list);
+        int j = 1;
         while (*metadata != NULL) {
-            printf("\t\t%s\n", *metadata);
+            std::string s_metadata = *metadata;
+            size_t equal_sign_index = s_metadata.find('=', 1);
+            if (equal_sign_index != std::string::npos) {
+                std::string key = s_metadata.substr(0, equal_sign_index);
+                print_item(poSrcDS, key.c_str(), *domain_list);
+            } else {
+                printf("\t\t%d. %s\n", j++, *metadata);
+            }
             metadata++;
         }
-
-
         domain_list++;
     }
+    printf("END DOMAIN LIST\n\n");
 
-    printf("END DOMAIN LIST:\n");
+
+
+
 }
 heif_image* get_band(GDALRasterBand* band, const char* pszFilename) {
 
@@ -657,9 +678,6 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
         //Encode Image
         heif_context_encode_image(context, output_image, encoder, nullptr, &handle);
 
-        //Write Image
-        heif_context_write_to_file(context, pszFilename);
-        printf("Created: %s\n", pszFilename);
     } else {
         //Monochrome or Multispectral or Hyperspectral
         char filename[512];
@@ -669,6 +687,14 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
             heif_image* img = get_band(band, filename);
             error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
         }
+
+    const char* uri_key = "06.0E.2B.34.01.01.01.01.0F.00.00.00.00.00.00.00";
+    const char* value = poSrcDS->GetMetadataItem("NITF_FDT", nullptr);
+    heif_context_add_generic_metadata(  context, 
+                                        handle, 
+                                        value, sizeof(value), 
+                                        "uri ", uri_key);
+
 
         heif_context_write_to_file(context, pszFilename);
         printf("Created: %s\n", pszFilename);
