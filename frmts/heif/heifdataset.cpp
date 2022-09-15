@@ -688,12 +688,12 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
             error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
         }
 
-    const char* uri_key = "06.0E.2B.34.01.01.01.01.0F.00.00.00.00.00.00.00";
+    const char* uri_key = "urn:misb:KLV:ul:060E2B34010101010F00000000000000";
     const char* value = poSrcDS->GetMetadataItem("NITF_FDT", nullptr);
-    heif_context_add_generic_metadata(  context, 
-                                        handle, 
-                                        value, sizeof(value), 
-                                        "uri ", uri_key);
+    // heif_context_add_generic_metadata(  context, 
+    //                                     handle, 
+    //                                     value, sizeof(value), 
+    //                                     "uri ", "1234");
 
 
         heif_context_write_to_file(context, pszFilename);
