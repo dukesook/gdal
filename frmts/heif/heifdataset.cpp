@@ -444,9 +444,9 @@ static void copy_metadata(GDALDataset *poSrcDS, GDALDataset* destination) {
         for ( ; *metadata != NULL; metadata++) {
             std::string key = extract_metadata_key(*metadata);
             std::string value = extract_metadata_value(*metadata);
-            printf("\t%s\n", *metadata);
-            printf("\t%s - %s\n", key.c_str(), value.c_str());
+            // printf("\t%s\n", *metadata);
             if (!value.empty()) {
+                printf("\t%s - %s\n", key.c_str(), value.c_str());
                 destination->SetMetadataItem(key.c_str(), value.c_str(), *domain_list);
             }
             // print_item(poSrcDS, key.c_str(), *domain_list);
@@ -757,7 +757,7 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
     poHEIF_DS->psPam = new GDALDatasetPamInfo(); //can't be null for xml metadata
     poHEIF_DS->psPam->bHasMetadata = true;
 
-    print_metadata(poSrcDS);
+    // print_metadata(poSrcDS);
     copy_metadata(poSrcDS, poHEIF_DS);
 
     heif_context_get_primary_image_handle(context, &handle);
