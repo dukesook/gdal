@@ -84,6 +84,8 @@ class GDALHEIFDataset final: public GDALPamDataset
                                 int bStrict, char ** papszOptions,
                                 GDALProgressFunc pfnProgress,
                                 void *pProgressData );
+        virtual void FlushCache(bool bAtClosing) override;
+        
 };
 
 /************************************************************************/
@@ -688,8 +690,8 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
             error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
         }
 
-    const char* uri_key = "urn:misb:KLV:ul:060E2B34010101010F00000000000000";
-    const char* value = poSrcDS->GetMetadataItem("NITF_FDT", nullptr);
+    // const char* uri_key = "urn:misb:KLV:ul:060E2B34010101010F00000000000000";
+    // const char* value = poSrcDS->GetMetadataItem("NITF_FDT", nullptr);
     // heif_context_add_generic_metadata(  context, 
     //                                     handle, 
     //                                     value, sizeof(value), 
@@ -701,7 +703,30 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
     }
 
 
-    return nullptr;
+    //dukesook dump
+    GDALHEIFDataset *poHEIF_DS = new GDALHEIFDataset();
+    poHEIF_DS->nRasterXSize = nXSize;
+    poHEIF_DS->nRasterYSize = nYSize;
+    // poHEIF_DS->nPamFlags |= GPF_DIRTY; // .pam file needs to be written on close
+    
+
+    poHEIF_DS->SetMetadataItem("key1", "value1", "domain1");
+    poHEIF_DS->SetMetadataItem("key2", "value2", "domain1");
+    poHEIF_DS->SetMetadataItem("key3", "value3", "domain2");
+    poHEIF_DS->SetMetadataItem("key4", "value4", "domain2");
+
+    poHEIF_DS->psPam = new GDALDatasetPamInfo(); //can't be null for xml metadata
+    poHEIF_DS->psPam->bHasMetadata = true;
+
+    heif_context_get_primary_image_handle(context, &handle);
+    poHEIF_DS->m_hImageHandle = handle;
+    for (int i = 0; i < nBands; i++) {
+        GDALRasterBand* newBand = new GDALHEIFRasterBand(poHEIF_DS, i+1);
+
+        poHEIF_DS->SetBand(i+1, newBand);
+    }
+
+    return poHEIF_DS;
 }
 
 /************************************************************************/
@@ -833,6 +858,25 @@ void GDALHEIFDataset::ReadMetadata()
     }
 }
 
+/************************************************************************/
+/*                           FlushCache(bool bAtClosing)                               */
+/************************************************************************/
+
+void GDALHEIFDataset::FlushCache(bool bAtClosing)
+
+{
+    printf("heifdataset.cpp - FlushCache()\n");
+    GDALPamDataset::FlushCache(bAtClosing);
+
+    // if (bHasDoneJpegStartDecompress)
+    // {
+    //     Restart();
+    // }
+
+    // For the needs of the implicit JPEG-in-TIFF overview mechanism.
+    // for(int i = 0; i < nInternalOverviewsCurrent; i++)
+        // papoInternalOverviews[i]->FlushCache(bAtClosing);
+}
 
 /************************************************************************/
 /*                         OpenThumbnails()                             */
