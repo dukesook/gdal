@@ -363,13 +363,12 @@ bool GDALHEIFDataset::Init(GDALOpenInfo* poOpenInfo)
 }
 
 
-void print_metadata(GDALDataset *poSrcDS);
-heif_image* get_band(GDALRasterBand* band, const char* pszFilename);
-void print_item(GDALDataset *poSrcDS, const char* key, const char* domain);
+
 /************************************************************************/
 /*                              CreateCopy()                            */
 /************************************************************************/
-void print_item(GDALDataset *poSrcDS, const char* key, const char* domain) {
+
+static void print_item(GDALDataset *poSrcDS, const char* key, const char* domain) {
     const char* value = poSrcDS->GetMetadataItem(key, domain);
     if (value != nullptr) {
         size_t length = strlen(value);
@@ -380,8 +379,7 @@ void print_item(GDALDataset *poSrcDS, const char* key, const char* domain) {
         printf("\t\tKey %s not found\n", key);
     }
 }
-
-void print_metadata(GDALDataset *poSrcDS) {
+static void print_metadata(GDALDataset *poSrcDS) {
     char** domain_list = poSrcDS->GetMetadataDomainList();
 
     printf("\nDOMAIN LIST:\n");
@@ -404,12 +402,62 @@ void print_metadata(GDALDataset *poSrcDS) {
         domain_list++;
     }
     printf("END DOMAIN LIST\n\n");
+}
+static std::string extract_metadata_key(std::string metadata) {
+    
+    //metadata is given as "NITF_Key=Value"
+    std::string key;
+    
+    //Remove Prefix
+    size_t prefix_index = metadata.find("NITF_");
+    if (prefix_index == 0) { //Key has the NITF_ prefix
+        metadata = metadata.substr(5);
+    }
 
+    size_t equal_sign_index = metadata.find('='); //Index of the first '='
 
+    if (equal_sign_index != std::string::npos) {
+        key = metadata.substr(0, equal_sign_index);
+    }
+
+    return key;
+
+}
+static std::string extract_metadata_value(std::string metadata) {
+    
+    //metadata is given as "NITF_Key=Value"
+    std::string value;
+    size_t equal_sign_index = metadata.find('='); //Index of the first '='
+    size_t value_index = equal_sign_index + 1;
+    value = metadata.substr(value_index);
+
+    return value;
+}
+static void copy_metadata(GDALDataset *poSrcDS, GDALDataset* destination) {
+
+    char** domain_list = poSrcDS->GetMetadataDomainList();
+
+    for (; *domain_list != NULL; domain_list++) {
+        char** metadata = poSrcDS->GetMetadata(*domain_list);
+        printf("%s\n", *domain_list);
+
+        for ( ; *metadata != NULL; metadata++) {
+            std::string key = extract_metadata_key(*metadata);
+            std::string value = extract_metadata_value(*metadata);
+            printf("\t%s\n", *metadata);
+            printf("\t%s - %s\n", key.c_str(), value.c_str());
+            if (!value.empty()) {
+                destination->SetMetadataItem(key.c_str(), value.c_str(), *domain_list);
+            }
+            // print_item(poSrcDS, key.c_str(), *domain_list);
+        }
+    }
+
+    destination->GetBands(); //delete
 
 
 }
-heif_image* get_band(GDALRasterBand* band, const char* pszFilename) {
+static heif_image* get_band(GDALRasterBand* band) {
 
     // GDALRasterBand* band = poSrcDS->GetRasterBand(1);
 
@@ -543,9 +591,6 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
                         void *pProgressData )
 {
 
-    //****Testing****//
-    print_metadata(poSrcDS); //TESTING
-    //****Testing****//
 
     // Create the dataset.
     VSILFILE *fpImage = nullptr;
@@ -686,7 +731,7 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
         for (int i = 1; i <= nBands; i++) {
             GDALRasterBand* band = poSrcDS->GetRasterBand(i);
             sprintf(filename, "%s%d.heic", pszFilename, i);
-            heif_image* img = get_band(band, filename);
+            heif_image* img = get_band(band);
             error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
         }
 
@@ -708,15 +753,12 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
     poHEIF_DS->nRasterXSize = nXSize;
     poHEIF_DS->nRasterYSize = nYSize;
     // poHEIF_DS->nPamFlags |= GPF_DIRTY; // .pam file needs to be written on close
-    
-
-    poHEIF_DS->SetMetadataItem("key1", "value1", "domain1");
-    poHEIF_DS->SetMetadataItem("key2", "value2", "domain1");
-    poHEIF_DS->SetMetadataItem("key3", "value3", "domain2");
-    poHEIF_DS->SetMetadataItem("key4", "value4", "domain2");
 
     poHEIF_DS->psPam = new GDALDatasetPamInfo(); //can't be null for xml metadata
     poHEIF_DS->psPam->bHasMetadata = true;
+
+    print_metadata(poSrcDS);
+    copy_metadata(poSrcDS, poHEIF_DS);
 
     heif_context_get_primary_image_handle(context, &handle);
     poHEIF_DS->m_hImageHandle = handle;
