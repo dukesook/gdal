@@ -734,19 +734,10 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
             heif_image* img = get_band(band);
             error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
         }
-
-    // const char* uri_key = "urn:misb:KLV:ul:060E2B34010101010F00000000000000";
-    // const char* value = poSrcDS->GetMetadataItem("NITF_FDT", nullptr);
-    // heif_context_add_generic_metadata(  context, 
-    //                                     handle, 
-    //                                     value, sizeof(value), 
-    //                                     "uri ", "1234");
-
-
-        heif_context_write_to_file(context, pszFilename);
-        printf("Created: %s\n", pszFilename);
     }
 
+    heif_context_write_to_file(context, pszFilename);
+    printf("Created: %s\n", pszFilename);
 
     //dukesook dump
     GDALHEIFDataset *poHEIF_DS = new GDALHEIFDataset();
