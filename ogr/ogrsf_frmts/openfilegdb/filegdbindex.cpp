@@ -42,13 +42,13 @@
 #include "cpl_conv.h"
 #include "cpl_error.h"
 #include "cpl_mem_cache.h"
+#include "cpl_noncopyablevector.h"
 #include "cpl_string.h"
 #include "cpl_time.h"
 #include "cpl_vsi.h"
 #include "ogr_core.h"
 #include "filegdbtable.h"
 
-CPL_CVSID("$Id$")
 
 namespace OpenFileGDB
 {
@@ -210,7 +210,8 @@ protected:
 
         GByte                abyPage[MAX_DEPTH][FGDB_PAGE_SIZE];
         GByte                abyPageFeature[FGDB_PAGE_SIZE];
-        typedef lru11::Cache<int, std::shared_ptr<std::vector<GByte>>> CacheType;
+
+        typedef lru11::Cache<int, cpl::NonCopyableVector<GByte>> CacheType;
         std::array<CacheType, MAX_DEPTH> m_oCachePage{{CacheType{2,0}, CacheType{2,0}, CacheType{2,0}}};
         CacheType            m_oCacheFeaturePage{2,0};
 
@@ -1444,32 +1445,27 @@ int FileGDBIndexIteratorBase::LoadNextFeaturePage()
         returnErrorIf(nPage < 2);
     }
 
-    std::shared_ptr<std::vector<GByte>> cachedPage;
-    if( m_oCacheFeaturePage.tryGet(nPage, cachedPage) )
+    const cpl::NonCopyableVector<GByte>* cachedPagePtr = m_oCacheFeaturePage.getPtr(nPage);
+    if( cachedPagePtr )
     {
-        memcpy(abyPageFeature, cachedPage->data(), FGDB_PAGE_SIZE);
+        memcpy(abyPageFeature, cachedPagePtr->data(), FGDB_PAGE_SIZE);
     }
     else
     {
+        cpl::NonCopyableVector<GByte> cachedPage;
         if( m_oCacheFeaturePage.size() == m_oCacheFeaturePage.getMaxSize() )
         {
-            int key;
-            m_oCacheFeaturePage.getOldestEntry(key, cachedPage);
-            m_oCacheFeaturePage.remove(key);
-            CPLAssert(cachedPage);
-            cachedPage->clear();
+            m_oCacheFeaturePage.removeAndRecycleOldestEntry(cachedPage);
+            cachedPage.clear();
         }
-        else
-        {
-            cachedPage.reset(new std::vector<GByte>());
-        }
+
         VSIFSeekL(fpCurIdx, (nPage - 1) * FGDB_PAGE_SIZE, SEEK_SET);
 #ifdef DEBUG
         iLoadedPage[nIndexDepth - 1] = nPage;
 #endif
         returnErrorIf(VSIFReadL( abyPageFeature, FGDB_PAGE_SIZE, 1, fpCurIdx ) != 1);
-        m_oCacheFeaturePage.insert(nPage, cachedPage);
-        cachedPage->insert(cachedPage->end(), abyPageFeature, abyPageFeature + FGDB_PAGE_SIZE);
+        cachedPage.insert(cachedPage.end(), abyPageFeature, abyPageFeature + FGDB_PAGE_SIZE);
+        m_oCacheFeaturePage.insert(nPage, std::move(cachedPage));
     }
 
     GUInt32 nFeatures = GetUInt32(abyPageFeature + 4, 0);
@@ -2136,6 +2132,31 @@ bool FileGDBSpatialIndexIteratorImpl::Init()
 
     returnErrorIf(m_nValueSize != sizeof(uint64_t));
 
+    const auto IsPositiveInt = [](double x)
+    {
+        return x >= 0 && x <= INT_MAX;
+    };
+
+    const auto& gridRes = poParent->GetSpatialIndexGridResolution();
+    const FileGDBGeomField* poGDBGeomField = poParent->GetGeomField();
+    if( gridRes.empty() || !(gridRes[0] > 0) ||
+        // Check if the center of the layer extent results in valid scaled coords
+        !(!std::isnan(poGDBGeomField->GetXMin()) &&
+          IsPositiveInt(GetScaledCoord(0.5 *
+              (poGDBGeomField->GetXMin() + poGDBGeomField->GetXMax()))) &&
+          IsPositiveInt(GetScaledCoord(0.5 *
+              (poGDBGeomField->GetYMin() + poGDBGeomField->GetYMax())))) )
+    {
+        // gridRes[0] == 1.61271680278378622e-312 happens on layer Zone18_2014_01_Broadcast
+        // of https://coast.noaa.gov/htdata/CMSP/AISDataHandler/2014/01/Zone18_2014_01.zip
+        // The FileGDB driver does not use the .spx file in that situation,
+        // so do we.
+        CPLDebug("OpenFileGDB",
+                 "Cannot use %s as the grid resolution is invalid",
+                 pszSpxName);
+        return false;
+    }
+
     return ResetInternal();
 }
 
@@ -2269,24 +2290,18 @@ bool FileGDBSpatialIndexIteratorImpl::FindPages(int iLevel, int nPage)
 
     iFirstPageIdx[iLevel] = iLastPageIdx[iLevel] = -1;
 
-    std::shared_ptr<std::vector<GByte>> cachedPage;
-    if( m_oCachePage[iLevel].tryGet(nPage, cachedPage) )
+    const cpl::NonCopyableVector<GByte>* cachedPagePtr = m_oCachePage[iLevel].getPtr(nPage);
+    if( cachedPagePtr )
     {
-        memcpy(abyPage[iLevel], cachedPage->data(), FGDB_PAGE_SIZE);
+        memcpy(abyPage[iLevel], cachedPagePtr->data(), FGDB_PAGE_SIZE);
     }
     else
     {
+        cpl::NonCopyableVector<GByte> cachedPage;
         if( m_oCachePage[iLevel].size() == m_oCachePage[iLevel].getMaxSize() )
         {
-            int key;
-            m_oCachePage[iLevel].getOldestEntry(key, cachedPage);
-            m_oCachePage[iLevel].remove(key);
-            CPLAssert(cachedPage);
-            cachedPage->clear();
-        }
-        else
-        {
-            cachedPage.reset(new std::vector<GByte>());
+            m_oCachePage[iLevel].removeAndRecycleOldestEntry(cachedPage);
+            cachedPage.clear();
         }
 
         VSIFSeekL(fpCurIdx, (nPage - 1) * FGDB_PAGE_SIZE, SEEK_SET);
@@ -2294,8 +2309,8 @@ bool FileGDBSpatialIndexIteratorImpl::FindPages(int iLevel, int nPage)
         iLoadedPage[iLevel] = nPage;
 #endif
         returnErrorIf(VSIFReadL( abyPage[iLevel], FGDB_PAGE_SIZE, 1, fpCurIdx ) != 1);
-        m_oCachePage[iLevel].insert(nPage, cachedPage);
-        cachedPage->insert(cachedPage->end(), abyPage[iLevel], abyPage[iLevel] + FGDB_PAGE_SIZE);
+        cachedPage.insert(cachedPage.end(), abyPage[iLevel], abyPage[iLevel] + FGDB_PAGE_SIZE);
+        m_oCachePage[iLevel].insert(nPage, std::move(cachedPage));
     }
 
     nSubPagesCount[iLevel] = GetUInt32(abyPage[iLevel] + 4, 0);

@@ -58,7 +58,8 @@ add_library(
   ograpispy.cpp
   ogr_xerces.cpp
   ogr_geo_utils.cpp
-  ogr_proj_p.cpp)
+  ogr_proj_p.cpp
+  ogr_wkb.cpp)
 add_dependencies(ogr generate_gdal_version_h)
 if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
   set_property(
@@ -169,7 +170,7 @@ add_custom_target(check_swq_parser_md5 ALL
                   COMMAND ${CMAKE_COMMAND}
                       "-DIN_FILE=swq_parser.y"
                       "-DTARGET=generate_swq_parser"
-                      "-DEXPECTED_MD5SUM=c6045585ecf63a90cefd6b5b3f9fe52b"
+                      "-DEXPECTED_MD5SUM=6213b394532642ebbe6cb3304f2860fc"
                       "-DFILENAME_CMAKE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
                       -P "${PROJECT_SOURCE_DIR}/cmake/helpers/check_md5sum.cmake"
                   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

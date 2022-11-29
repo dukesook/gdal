@@ -31,7 +31,6 @@
 
 #include <algorithm>
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRPCIDSKLayer()                           */
@@ -448,6 +447,9 @@ int OGRPCIDSKLayer::TestCapability( const char * pszCap )
 
     else if( EQUAL(pszCap,OLCCreateField) )
         return bUpdateAccess;
+
+    else if( EQUAL(pszCap, OLCZGeometries) )
+        return TRUE;
 
     return FALSE;
 }

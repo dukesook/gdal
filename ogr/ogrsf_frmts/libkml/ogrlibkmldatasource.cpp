@@ -35,7 +35,6 @@
 #include "ogr_p.h"
 #include "cpl_vsi_error.h"
 
-CPL_CVSID("$Id$")
 
 using kmlbase::Attributes;
 using kmldom::ContainerPtr;
@@ -430,13 +429,16 @@ void OGRLIBKMLDataSource::WriteKmz()
             m_poKmlDocKmlRoot =
                 OGRLIBKMLCreateOGCKml22(m_poKmlFactory, m_papszOptions);
 
+            auto kml = AsKml( m_poKmlDocKmlRoot );
             if( m_poKmlDocKml )
             {
-                AsKml( m_poKmlDocKmlRoot )->set_feature( m_poKmlDocKml );
+                if( kml )
+                {
+                    kml->set_feature( m_poKmlDocKml );
+                }
             }
 
-            ParseDocumentOptions(
-                AsKml( m_poKmlDocKmlRoot ), AsDocument(m_poKmlDocKml));
+            ParseDocumentOptions(kml, AsDocument(m_poKmlDocKml));
         }
 
         std::string oKmlOut = kmldom::SerializePretty( m_poKmlDocKmlRoot );
@@ -550,11 +552,14 @@ void OGRLIBKMLDataSource::WriteDir()
         {
             m_poKmlDocKmlRoot =
                 OGRLIBKMLCreateOGCKml22(m_poKmlFactory, m_papszOptions);
-            if( m_poKmlDocKml )
-                AsKml( m_poKmlDocKmlRoot )->set_feature( m_poKmlDocKml );
+            auto kml = AsKml( m_poKmlDocKmlRoot );
+            if( kml )
+            {
+                if( m_poKmlDocKml )
+                    kml->set_feature( m_poKmlDocKml );
+            }
 
-            ParseDocumentOptions(
-                AsKml( m_poKmlDocKmlRoot ), AsDocument(m_poKmlDocKml));
+            ParseDocumentOptions(kml, AsDocument(m_poKmlDocKml));
         }
 
         std::string oKmlOut = kmldom::SerializePretty( m_poKmlDocKmlRoot );
@@ -819,6 +824,7 @@ SchemaPtr OGRLIBKMLDataSource::FindSchema( const char *pszSchemaUrl )
 OGRLIBKMLLayer *OGRLIBKMLDataSource::AddLayer(
     const char *pszLayerName,
     OGRwkbGeometryType eGType,
+    const OGRSpatialReference* poSRS,
     OGRLIBKMLDataSource * poOgrDS,
     ElementPtr poKmlRoot,
     ContainerPtr poKmlContainer,
@@ -849,6 +855,7 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::AddLayer(
     /***** create the layer *****/
     OGRLIBKMLLayer *poOgrLayer = new OGRLIBKMLLayer( osUniqueLayername,
                                                       eGType,
+                                                      poSRS,
                                                       poOgrDS,
                                                       poKmlRoot,
                                                       poKmlContainer,
@@ -869,7 +876,6 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::AddLayer(
  Method to parse multiple layers out of a container.
 
  Args:          poKmlContainer  pointer to the container to parse
-                poOgrSRS        SRS to use when creating the layer
 
  Returns:       number of features in the container that are not another
                 container
@@ -878,7 +884,6 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::AddLayer(
 
 int OGRLIBKMLDataSource::ParseLayers(
     ContainerPtr poKmlContainer,
-    OGRSpatialReference * poOgrSRS,
     bool bRecurse)
 {
     /***** if container is null just bail now *****/
@@ -936,12 +941,12 @@ int OGRLIBKMLDataSource::ParseLayers(
             /***** create the layer *****/
 
             AddLayer( oKmlFeatName.c_str(),
-                      wkbUnknown, this,
+                      wkbUnknown, nullptr, this,
                       nullptr, AsContainer( poKmlFeat ), "", FALSE, bUpdate,
                       static_cast<int>(nKmlFeatures) );
 
             /***** check if any features are another layer *****/
-            ParseLayers( AsContainer(poKmlFeat), poOgrSRS, true );
+            ParseLayers( AsContainer(poKmlFeat), true );
           }
         }
         else
@@ -978,7 +983,7 @@ static ContainerPtr GetContainerFromRoot(
         {
             KmlPtr poKmlKml = AsKml( poKmlRoot );
 
-            if( poKmlKml->has_feature() )
+            if( poKmlKml && poKmlKml->has_feature() )
             {
                 FeaturePtr poKmlFeat = poKmlKml->get_feature();
 
@@ -1080,11 +1085,6 @@ int OGRLIBKMLDataSource::OpenKml( const char *pszFilename, int bUpdateIn )
 
     CPLLocaleC  oLocaleForcer;
 
-    /***** create a SRS *****/
-    OGRSpatialReference *poOgrSRS =
-        new OGRSpatialReference( SRS_WKT_WGS84_LAT_LONG );
-    poOgrSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
     /***** parse the kml into the DOM *****/
     std::string oKmlErrors;
 
@@ -1095,7 +1095,6 @@ int OGRLIBKMLDataSource::OpenKml( const char *pszFilename, int bUpdateIn )
         CPLError( CE_Failure, CPLE_OpenFailed,
                   "ERROR parsing kml %s :%s",
                   pszFilename, oKmlErrors.c_str() );
-        delete poOgrSRS;
 
         return FALSE;
     }
@@ -1108,7 +1107,6 @@ int OGRLIBKMLDataSource::OpenKml( const char *pszFilename, int bUpdateIn )
                   "ERROR parsing kml %s :%s %s",
                   pszFilename, "This file does not fit the OGR model,",
                   "there is no container element at the root." );
-        delete poOgrSRS;
 
         return FALSE;
     }
@@ -1119,7 +1117,7 @@ int OGRLIBKMLDataSource::OpenKml( const char *pszFilename, int bUpdateIn )
     ParseStyles( AsDocument( m_poKmlDSContainer ), &m_poStyleTable );
 
     /***** parse for layers *****/
-    int nPlacemarks = ParseLayers( m_poKmlDSContainer, poOgrSRS, false );
+    int nPlacemarks = ParseLayers( m_poKmlDSContainer, false );
 
     /***** if there is placemarks in the root its a layer *****/
     if( nPlacemarks )
@@ -1132,14 +1130,12 @@ int OGRLIBKMLDataSource::OpenKml( const char *pszFilename, int bUpdateIn )
       }
 
       AddLayer( layername_default.c_str(),
-                wkbUnknown,
+                wkbUnknown, nullptr,
                 this, m_poKmlDSKml, m_poKmlDSContainer, pszFilename, FALSE,
                 bUpdateIn, 1 );
     }
 
-    ParseLayers( m_poKmlDSContainer, poOgrSRS, true );
-
-    delete poOgrSRS;
+    ParseLayers( m_poKmlDSContainer, true );
 
     return TRUE;
 }
@@ -1200,11 +1196,6 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
         return FALSE;
     }
 
-    /***** create a SRS *****/
-    OGRSpatialReference *poOgrSRS =
-        new OGRSpatialReference( SRS_WKT_WGS84_LAT_LONG );
-    poOgrSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
     /***** parse the kml into the DOM *****/
     std::string oKmlErrors;
     ElementPtr poKmlDocKmlRoot = OGRLIBKMLParse( oKmlKml, &oKmlErrors );
@@ -1215,7 +1206,6 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
                   "ERROR parsing kml layer %s from %s :%s",
                   oKmlKmlPath.c_str(),
                   pszFilename, oKmlErrors.c_str() );
-        delete poOgrSRS;
 
         return FALSE;
     }
@@ -1230,7 +1220,6 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
                   "ERROR parsing %s from %s :%s",
                   oKmlKmlPath.c_str(),
                   pszFilename, "kml contains no Containers" );
-        delete poOgrSRS;
 
         return FALSE;
     }
@@ -1306,12 +1295,12 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
                 /***** create the layer *****/
                 AddLayer( CPLGetBasename
                           ( poKmlHref->get_path().c_str() ),
-                           wkbUnknown, this, poKmlLyrRoot, poKmlLyrContainer,
+                           wkbUnknown, nullptr, this, poKmlLyrRoot, poKmlLyrContainer,
                            poKmlHref->get_path().c_str(), FALSE, bUpdateIn,
                            static_cast<int>(nKmlFeatures) );
 
                 /***** check if any features are another layer *****/
-                ParseLayers( poKmlLyrContainer, poOgrSRS, true );
+                ParseLayers( poKmlLyrContainer, true );
            }
         }
 
@@ -1337,7 +1326,7 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
         ParseStyles( AsDocument( poKmlContainer ), &m_poStyleTable );
 
         /***** parse for layers *****/
-       const int nPlacemarks = ParseLayers( poKmlContainer, poOgrSRS, false );
+       const int nPlacemarks = ParseLayers( poKmlContainer, false );
 
         /***** if there is placemarks in the root its a layer *****/
         if( nPlacemarks )
@@ -1350,12 +1339,12 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
             }
 
             AddLayer( layername_default.c_str(),
-                      wkbUnknown,
+                      wkbUnknown, nullptr,
                       this, poKmlDocKmlRoot, poKmlContainer,
                       pszFilename, FALSE, bUpdateIn, 1 );
         }
 
-        ParseLayers( poKmlContainer, poOgrSRS, true );
+        ParseLayers( poKmlContainer, true );
     }
 
     /***** read the style table if it has one *****/
@@ -1364,8 +1353,6 @@ int OGRLIBKMLDataSource::OpenKmz( const char *pszFilename, int bUpdateIn )
         ParseIntoStyleTable( &oKmlStyleKml, "style/style.kml");
 
     /***** cleanup *****/
-    delete poOgrSRS;
-
     delete poKmlKmzfile;
     m_isKmz = true;
 
@@ -1388,11 +1375,6 @@ int OGRLIBKMLDataSource::OpenDir( const char *pszFilename, int bUpdateIn )
 
     if( papszDirList == nullptr )
         return FALSE;
-
-    /***** create a SRS *****/
-    OGRSpatialReference *poOgrSRS =
-        new OGRSpatialReference( SRS_WKT_WGS84_LAT_LONG );
-    poOgrSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
     const int nFiles = CSLCount( papszDirList );
 
@@ -1473,15 +1455,13 @@ int OGRLIBKMLDataSource::OpenDir( const char *pszFilename, int bUpdateIn )
 
         /***** create the layer *****/
         AddLayer( CPLGetBasename( osFilePath.c_str() ),
-                  wkbUnknown,
+                  wkbUnknown, nullptr,
                   this, poKmlRoot, poKmlContainer, osFilePath.c_str(), FALSE,
                   bUpdateIn, nFiles );
 
         /***** check if any features are another layer *****/
-        ParseLayers( poKmlContainer, poOgrSRS, true );
+        ParseLayers( poKmlContainer, true );
     }
-
-    delete poOgrSRS;
 
     CSLDestroy( papszDirList );
 
@@ -2189,7 +2169,7 @@ OGRErr OGRLIBKMLDataSource::DeleteLayer( int iLayer )
 
 OGRLIBKMLLayer *OGRLIBKMLDataSource::CreateLayerKml(
     const char *pszLayerName,
-    OGRSpatialReference *,
+    OGRSpatialReference* poSRS,
     OGRwkbGeometryType eGType,
     char **papszOptions )
 {
@@ -2208,7 +2188,7 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::CreateLayerKml(
 
     /***** create the layer *****/
     OGRLIBKMLLayer *poOgrLayer =
-        AddLayer( pszLayerName, eGType, this,
+        AddLayer( pszLayerName, eGType, poSRS, this,
                   nullptr, poKmlLayerContainer, "", TRUE, bUpdate, 1 );
 
     /***** add the layer name as a <Name> *****/
@@ -2236,7 +2216,7 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::CreateLayerKml(
 
 OGRLIBKMLLayer *OGRLIBKMLDataSource::CreateLayerKmz(
     const char *pszLayerName,
-    OGRSpatialReference *,
+    OGRSpatialReference * poSRS,
     OGRwkbGeometryType eGType,
     char ** /* papszOptions */ )
 {
@@ -2273,7 +2253,7 @@ OGRLIBKMLLayer *OGRLIBKMLDataSource::CreateLayerKmz(
     }
 
     OGRLIBKMLLayer *poOgrLayer =
-        AddLayer( pszLayerName, eGType, this,
+        AddLayer( pszLayerName, eGType, poSRS, this,
                   nullptr, poKmlDocument,
                   CPLFormFilename( nullptr, pszLayerName, ".kml" ),
                   TRUE, bUpdate, 1 );

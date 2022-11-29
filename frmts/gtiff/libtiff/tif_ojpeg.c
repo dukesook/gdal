@@ -428,16 +428,16 @@ TIFFInitOJPEG(TIFF* tif, int scheme)
 	 * Merge codec-specific tag information.
 	 */
 	if (!_TIFFMergeFields(tif, ojpegFields, TIFFArrayCount(ojpegFields))) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "Merging Old JPEG codec-specific tags failed");
 		return 0;
 	}
 
 	/* state block */
-	sp=_TIFFmalloc(sizeof(OJPEGState));
+	sp=_TIFFmallocExt(tif, sizeof(OJPEGState));
 	if (sp==NULL)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"No space for OJPEG state block");
+		TIFFErrorExtR(tif,module,"No space for OJPEG state block");
 		return(0);
 	}
 	_TIFFmemset(sp,0,sizeof(OJPEGState));
@@ -552,7 +552,7 @@ OJPEGVSetField(TIFF* tif, uint32_t tag, va_list ap)
 			{
 				if (ma>3)
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"JpegQTables tag has incorrect count");
+					TIFFErrorExtR(tif,module,"JpegQTables tag has incorrect count");
 					return(0);
 				}
 				sp->qtable_offset_count=(uint8_t)ma;
@@ -567,7 +567,7 @@ OJPEGVSetField(TIFF* tif, uint32_t tag, va_list ap)
 			{
 				if (ma>3)
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"JpegDcTables tag has incorrect count");
+					TIFFErrorExtR(tif,module,"JpegDcTables tag has incorrect count");
 					return(0);
 				}
 				sp->dctable_offset_count=(uint8_t)ma;
@@ -582,7 +582,7 @@ OJPEGVSetField(TIFF* tif, uint32_t tag, va_list ap)
 			{
 				if (ma>3)
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"JpegAcTables tag has incorrect count");
+					TIFFErrorExtR(tif,module,"JpegAcTables tag has incorrect count");
 					return(0);
 				}
 				sp->actable_offset_count=(uint8_t)ma;
@@ -659,7 +659,7 @@ static int
 OJPEGSetupDecode(TIFF* tif)
 {
 	static const char module[]="OJPEGSetupDecode";
-	TIFFWarningExt(tif->tif_clientdata,module,"Deprecated and troublesome old-style JPEG compression mode, please convert to new-style JPEG compression and notify vendor of writing software");
+	TIFFWarningExtR(tif,module,"Deprecated and troublesome old-style JPEG compression mode, please convert to new-style JPEG compression and notify vendor of writing software");
 	return(1);
 }
 
@@ -769,10 +769,10 @@ OJPEGPreDecodeSkipScanlines(TIFF* tif)
 	uint32_t m;
 	if (sp->skip_buffer==NULL)
 	{
-		sp->skip_buffer=_TIFFmalloc(sp->bytes_per_line);
+		sp->skip_buffer=_TIFFmallocExt(tif, sp->bytes_per_line);
 		if (sp->skip_buffer==NULL)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+			TIFFErrorExtR(tif,module,"Out of memory");
 			return(0);
 		}
 	}
@@ -792,7 +792,7 @@ OJPEGDecode(TIFF* tif, uint8_t* buf, tmsize_t cc, uint16_t s)
 	(void)s;
         if( !sp->decoder_ok )
         {
-            TIFFErrorExt(tif->tif_clientdata,module,"Cannot decode: decoder not correctly initialized");
+            TIFFErrorExtR(tif,module,"Cannot decode: decoder not correctly initialized");
             return 0;
         }
         if( sp->libjpeg_session_active == 0 )
@@ -803,7 +803,7 @@ OJPEGDecode(TIFF* tif, uint8_t* buf, tmsize_t cc, uint16_t s)
             /* and may thus incorrectly consider it has read the whole image, causing */
             /* OJPEGLibjpegSessionAbort() to be called prematurely. */
             /* Triggered by https://gitlab.com/libtiff/libtiff/-/issues/337 */
-            TIFFErrorExt(tif->tif_clientdata,module,"Cannot decode: libjpeg_session_active == 0");
+            TIFFErrorExtR(tif,module,"Cannot decode: libjpeg_session_active == 0");
             return 0;
         }
         if( sp->error_in_raw_data_decoding )
@@ -839,7 +839,7 @@ OJPEGDecodeRaw(TIFF* tif, uint8_t* buf, tmsize_t cc)
 	uint8_t sx,sy;
 	if (cc%sp->bytes_per_line!=0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Fractional scanline not read");
+		TIFFErrorExtR(tif,module,"Fractional scanline not read");
 		return(0);
 	}
 	assert(cc>0);
@@ -890,7 +890,7 @@ OJPEGDecodeScanlines(TIFF* tif, uint8_t* buf, tmsize_t cc)
 	tmsize_t n;
 	if (cc%sp->bytes_per_line!=0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Fractional scanline not read");
+		TIFFErrorExtR(tif,module,"Fractional scanline not read");
 		return(0);
 	}
 	assert(cc>0);
@@ -932,7 +932,7 @@ static int
 OJPEGSetupEncode(TIFF* tif)
 {
 	static const char module[]="OJPEGSetupEncode";
-	TIFFErrorExt(tif->tif_clientdata,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
+	TIFFErrorExtR(tif,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
 	return(0);
 }
 
@@ -941,7 +941,7 @@ OJPEGPreEncode(TIFF* tif, uint16_t s)
 {
 	static const char module[]="OJPEGPreEncode";
 	(void)s;
-	TIFFErrorExt(tif->tif_clientdata,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
+	TIFFErrorExtR(tif,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
 	return(0);
 }
 
@@ -952,7 +952,7 @@ OJPEGEncode(TIFF* tif, uint8_t* buf, tmsize_t cc, uint16_t s)
 	(void)buf;
 	(void)cc;
 	(void)s;
-	TIFFErrorExt(tif->tif_clientdata,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
+	TIFFErrorExtR(tif,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
 	return(0);
 }
 
@@ -960,7 +960,7 @@ static int
 OJPEGPostEncode(TIFF* tif)
 {
 	static const char module[]="OJPEGPostEncode";
-	TIFFErrorExt(tif->tif_clientdata,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
+	TIFFErrorExtR(tif,module,"OJPEG encoding not supported; use new-style JPEG compression instead");
 	return(0);
 }
 
@@ -974,38 +974,38 @@ OJPEGCleanup(TIFF* tif)
 		tif->tif_tagmethods.vsetfield=sp->vsetparent;
 		tif->tif_tagmethods.printdir=sp->printdir;
 		if (sp->qtable[0]!=0)
-			_TIFFfree(sp->qtable[0]);
+			_TIFFfreeExt(tif, sp->qtable[0]);
 		if (sp->qtable[1]!=0)
-			_TIFFfree(sp->qtable[1]);
+			_TIFFfreeExt(tif, sp->qtable[1]);
 		if (sp->qtable[2]!=0)
-			_TIFFfree(sp->qtable[2]);
+			_TIFFfreeExt(tif, sp->qtable[2]);
 		if (sp->qtable[3]!=0)
-			_TIFFfree(sp->qtable[3]);
+			_TIFFfreeExt(tif, sp->qtable[3]);
 		if (sp->dctable[0]!=0)
-			_TIFFfree(sp->dctable[0]);
+			_TIFFfreeExt(tif, sp->dctable[0]);
 		if (sp->dctable[1]!=0)
-			_TIFFfree(sp->dctable[1]);
+			_TIFFfreeExt(tif, sp->dctable[1]);
 		if (sp->dctable[2]!=0)
-			_TIFFfree(sp->dctable[2]);
+			_TIFFfreeExt(tif, sp->dctable[2]);
 		if (sp->dctable[3]!=0)
-			_TIFFfree(sp->dctable[3]);
+			_TIFFfreeExt(tif, sp->dctable[3]);
 		if (sp->actable[0]!=0)
-			_TIFFfree(sp->actable[0]);
+			_TIFFfreeExt(tif, sp->actable[0]);
 		if (sp->actable[1]!=0)
-			_TIFFfree(sp->actable[1]);
+			_TIFFfreeExt(tif, sp->actable[1]);
 		if (sp->actable[2]!=0)
-			_TIFFfree(sp->actable[2]);
+			_TIFFfreeExt(tif, sp->actable[2]);
 		if (sp->actable[3]!=0)
-			_TIFFfree(sp->actable[3]);
+			_TIFFfreeExt(tif, sp->actable[3]);
 		if (sp->libjpeg_session_active!=0)
 			OJPEGLibjpegSessionAbort(tif);
 		if (sp->subsampling_convert_ycbcrbuf!=0)
-			_TIFFfree(sp->subsampling_convert_ycbcrbuf);
+			_TIFFfreeExt(tif, sp->subsampling_convert_ycbcrbuf);
 		if (sp->subsampling_convert_ycbcrimage!=0)
-			_TIFFfree(sp->subsampling_convert_ycbcrimage);
+			_TIFFfreeExt(tif, sp->subsampling_convert_ycbcrimage);
 		if (sp->skip_buffer!=0)
-			_TIFFfree(sp->skip_buffer);
-		_TIFFfree(sp);
+			_TIFFfreeExt(tif, sp->skip_buffer);
+		_TIFFfreeExt(tif, sp);
 		tif->tif_data=NULL;
 		_TIFFSetDefaultCompressionState(tif);
 	}
@@ -1024,7 +1024,7 @@ OJPEGSubsamplingCorrect(TIFF* tif)
 	    (tif->tif_dir.td_photometric!=PHOTOMETRIC_ITULAB)))
 	{
 		if (sp->subsampling_tag!=0)
-			TIFFWarningExt(tif->tif_clientdata,module,"Subsampling tag not appropriate for this Photometric and/or SamplesPerPixel");
+			TIFFWarningExtR(tif,module,"Subsampling tag not appropriate for this Photometric and/or SamplesPerPixel");
 		sp->subsampling_hor=1;
 		sp->subsampling_ver=1;
 		sp->subsampling_force_desubsampling_inside_decompression=0;
@@ -1045,21 +1045,21 @@ OJPEGSubsamplingCorrect(TIFF* tif)
 		if (((sp->subsampling_hor!=mh) || (sp->subsampling_ver!=mv)) && (sp->subsampling_force_desubsampling_inside_decompression==0))
 		{
 			if (sp->subsampling_tag==0)
-				TIFFWarningExt(tif->tif_clientdata,module,"Subsampling tag is not set, yet subsampling inside JPEG data [%"PRIu8",%"PRIu8"] does not match default values [2,2]; assuming subsampling inside JPEG data is correct",sp->subsampling_hor,sp->subsampling_ver);
+				TIFFWarningExtR(tif,module,"Subsampling tag is not set, yet subsampling inside JPEG data [%"PRIu8",%"PRIu8"] does not match default values [2,2]; assuming subsampling inside JPEG data is correct",sp->subsampling_hor,sp->subsampling_ver);
 			else
-				TIFFWarningExt(tif->tif_clientdata,module,"Subsampling inside JPEG data [%"PRIu8",%"PRIu8"] does not match subsampling tag values [%"PRIu8",%"PRIu8"]; assuming subsampling inside JPEG data is correct",sp->subsampling_hor,sp->subsampling_ver,mh,mv);
+				TIFFWarningExtR(tif,module,"Subsampling inside JPEG data [%"PRIu8",%"PRIu8"] does not match subsampling tag values [%"PRIu8",%"PRIu8"]; assuming subsampling inside JPEG data is correct",sp->subsampling_hor,sp->subsampling_ver,mh,mv);
 		}
 		if (sp->subsampling_force_desubsampling_inside_decompression!=0)
 		{
 			if (sp->subsampling_tag==0)
-				TIFFWarningExt(tif->tif_clientdata,module,"Subsampling tag is not set, yet subsampling inside JPEG data does not match default values [2,2] (nor any other values allowed in TIFF); assuming subsampling inside JPEG data is correct and desubsampling inside JPEG decompression");
+				TIFFWarningExtR(tif,module,"Subsampling tag is not set, yet subsampling inside JPEG data does not match default values [2,2] (nor any other values allowed in TIFF); assuming subsampling inside JPEG data is correct and desubsampling inside JPEG decompression");
 			else
-				TIFFWarningExt(tif->tif_clientdata,module,"Subsampling inside JPEG data does not match subsampling tag values [%"PRIu8",%"PRIu8"] (nor any other values allowed in TIFF); assuming subsampling inside JPEG data is correct and desubsampling inside JPEG decompression",mh,mv);
+				TIFFWarningExtR(tif,module,"Subsampling inside JPEG data does not match subsampling tag values [%"PRIu8",%"PRIu8"] (nor any other values allowed in TIFF); assuming subsampling inside JPEG data is correct and desubsampling inside JPEG decompression",mh,mv);
 		}
 		if (sp->subsampling_force_desubsampling_inside_decompression==0)
 		{
 			if (sp->subsampling_hor<sp->subsampling_ver)
-				TIFFWarningExt(tif->tif_clientdata,module,"Subsampling values [%"PRIu8",%"PRIu8"] are not allowed in TIFF",sp->subsampling_hor,sp->subsampling_ver);
+				TIFFWarningExtR(tif,module,"Subsampling values [%"PRIu8",%"PRIu8"] are not allowed in TIFF",sp->subsampling_hor,sp->subsampling_ver);
 		}
 	}
 	sp->subsamplingcorrect_done=1;
@@ -1099,7 +1099,7 @@ OJPEGReadHeaderInfo(TIFF* tif)
 	{
 		if (tif->tif_dir.td_samplesperpixel!=3)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"SamplesPerPixel %"PRIu8" not supported for this compression scheme",sp->samples_per_pixel);
+			TIFFErrorExtR(tif,module,"SamplesPerPixel %"PRIu8" not supported for this compression scheme",sp->samples_per_pixel);
 			return(0);
 		}
 		sp->samples_per_pixel=3;
@@ -1114,12 +1114,12 @@ OJPEGReadHeaderInfo(TIFF* tif)
 		if (((sp->subsampling_hor!=1) && (sp->subsampling_hor!=2) && (sp->subsampling_hor!=4)) ||
 		    ((sp->subsampling_ver!=1) && (sp->subsampling_ver!=2) && (sp->subsampling_ver!=4)))
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"Invalid subsampling values");
+			TIFFErrorExtR(tif,module,"Invalid subsampling values");
 			return(0);
 		}
 		if (sp->strile_length%(sp->subsampling_ver*8)!=0)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"Incompatible vertical subsampling and image strip/tile length");
+			TIFFErrorExtR(tif,module,"Incompatible vertical subsampling and image strip/tile length");
 			return(0);
 		}
 		sp->restart_interval=(uint16_t)(((sp->strile_width + sp->subsampling_hor * 8 - 1) / (sp->subsampling_hor * 8)) * (sp->strile_length / (sp->subsampling_ver * 8)));
@@ -1238,20 +1238,20 @@ OJPEGWriteHeaderInfo(TIFF* tif)
                         /* See https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=16844 */
                         /* Even if this case is allowed (?), its handling is broken because OJPEGPreDecode() should also likely */
                         /* reset subsampling_convert_state to 0 when changing tile. */
-			sp->subsampling_convert_ycbcrbuf=_TIFFcalloc(1, sp->subsampling_convert_ycbcrbuflen);
+			sp->subsampling_convert_ycbcrbuf=_TIFFcallocExt(tif, 1, sp->subsampling_convert_ycbcrbuflen);
 			if (sp->subsampling_convert_ycbcrbuf==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			sp->subsampling_convert_ybuf=sp->subsampling_convert_ycbcrbuf;
 			sp->subsampling_convert_cbbuf=sp->subsampling_convert_ybuf+sp->subsampling_convert_ybuflen;
 			sp->subsampling_convert_crbuf=sp->subsampling_convert_cbbuf+sp->subsampling_convert_cbuflen;
 			sp->subsampling_convert_ycbcrimagelen=3+sp->subsampling_convert_ylines+2*sp->subsampling_convert_clines;
-			sp->subsampling_convert_ycbcrimage=_TIFFmalloc(sp->subsampling_convert_ycbcrimagelen*sizeof(uint8_t*));
+			sp->subsampling_convert_ycbcrimage=_TIFFmallocExt(tif, sp->subsampling_convert_ycbcrimagelen*sizeof(uint8_t*));
 			if (sp->subsampling_convert_ycbcrimage==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			m=sp->subsampling_convert_ycbcrimage;
@@ -1283,7 +1283,7 @@ OJPEGWriteHeaderInfo(TIFF* tif)
 	if (jpeg_start_decompress_encap(sp,&(sp->libjpeg_jpeg_decompress_struct))==0)
 		return(0);
         if(sp->libjpeg_jpeg_decompress_struct.image_width != sp->strile_width ) {
-            TIFFErrorExt(tif->tif_clientdata,module,
+            TIFFErrorExtR(tif,module,
                          "jpeg_start_decompress() returned image_width = %u, "
                          "expected %"PRIu32,
                          sp->libjpeg_jpeg_decompress_struct.image_width,
@@ -1292,7 +1292,7 @@ OJPEGWriteHeaderInfo(TIFF* tif)
         }
         if(sp->libjpeg_jpeg_decompress_struct.max_h_samp_factor != sp->subsampling_hor ||
            sp->libjpeg_jpeg_decompress_struct.max_v_samp_factor != sp->subsampling_ver) {
-            TIFFErrorExt(tif->tif_clientdata,module,
+            TIFFErrorExtR(tif,module,
                          "jpeg_start_decompress() returned max_h_samp_factor = %d "
                          "and max_v_samp_factor = %d, expected %"PRIu8" and %"PRIu8,
                          sp->libjpeg_jpeg_decompress_struct.max_h_samp_factor,
@@ -1385,7 +1385,7 @@ OJPEGReadHeaderInfoSec(TIFF* tif)
 				if (n<2)
 				{
 					if (sp->subsamplingcorrect==0)
-						TIFFErrorExt(tif->tif_clientdata,module,"Corrupt JPEG data");
+						TIFFErrorExtR(tif,module,"Corrupt JPEG data");
 					return(0);
 				}
 				if (n>2)
@@ -1419,7 +1419,7 @@ OJPEGReadHeaderInfoSec(TIFF* tif)
 					return(0);
 				break;
 			default:
-				TIFFErrorExt(tif->tif_clientdata,module,"Unknown marker type %"PRIu8" in JPEG data", m);
+				TIFFErrorExtR(tif,module,"Unknown marker type %"PRIu8" in JPEG data", m);
 				return(0);
 		}
 	} while(m!=JPEG_MARKER_SOS);
@@ -1460,7 +1460,7 @@ OJPEGReadHeaderInfoSecStreamDri(TIFF* tif)
 		return(0);
 	if (m!=4)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DRI marker in JPEG data");
+		TIFFErrorExtR(tif,module,"Corrupt DRI marker in JPEG data");
 		return(0);
 	}
 	if (OJPEGReadWord(sp,&m)==0)
@@ -1484,7 +1484,7 @@ OJPEGReadHeaderInfoSecStreamDqt(TIFF* tif)
 	if (m<=2)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DQT marker in JPEG data");
+			TIFFErrorExtR(tif,module,"Corrupt DQT marker in JPEG data");
 		return(0);
 	}
 	if (sp->subsamplingcorrect!=0)
@@ -1496,14 +1496,14 @@ OJPEGReadHeaderInfoSecStreamDqt(TIFF* tif)
 		{
 			if (m<65)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DQT marker in JPEG data");
+				TIFFErrorExtR(tif,module,"Corrupt DQT marker in JPEG data");
 				return(0);
 			}
 			na= sizeof(uint32_t) + 69;
-			nb=_TIFFmalloc(na);
+			nb=_TIFFmallocExt(tif, na);
 			if (nb==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			*(uint32_t*)nb=na;
@@ -1512,18 +1512,18 @@ OJPEGReadHeaderInfoSecStreamDqt(TIFF* tif)
 			nb[sizeof(uint32_t) + 2]=0;
 			nb[sizeof(uint32_t) + 3]=67;
 			if (OJPEGReadBlock(sp,65,&nb[sizeof(uint32_t) + 4]) == 0) {
-				_TIFFfree(nb);
+				_TIFFfreeExt(tif, nb);
 				return(0);
 			}
 			o= nb[sizeof(uint32_t) + 4] & 15;
 			if (3<o)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DQT marker in JPEG data");
-				_TIFFfree(nb);
+				TIFFErrorExtR(tif,module,"Corrupt DQT marker in JPEG data");
+				_TIFFfreeExt(tif, nb);
 				return(0);
 			}
 			if (sp->qtable[o]!=0)
-				_TIFFfree(sp->qtable[o]);
+				_TIFFfreeExt(tif, sp->qtable[o]);
 			sp->qtable[o]=nb;
 			m-=65;
 		} while(m>0);
@@ -1547,7 +1547,7 @@ OJPEGReadHeaderInfoSecStreamDht(TIFF* tif)
 	if (m<=2)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DHT marker in JPEG data");
+			TIFFErrorExtR(tif,module,"Corrupt DHT marker in JPEG data");
 		return(0);
 	}
 	if (sp->subsamplingcorrect!=0)
@@ -1557,10 +1557,10 @@ OJPEGReadHeaderInfoSecStreamDht(TIFF* tif)
 	else
 	{
 		na= sizeof(uint32_t) + 2 + m;
-		nb=_TIFFmalloc(na);
+		nb=_TIFFmallocExt(tif, na);
 		if (nb==0)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+			TIFFErrorExtR(tif,module,"Out of memory");
 			return(0);
 		}
 		*(uint32_t*)nb=na;
@@ -1569,7 +1569,7 @@ OJPEGReadHeaderInfoSecStreamDht(TIFF* tif)
 		nb[sizeof(uint32_t) + 2]=(m >> 8);
 		nb[sizeof(uint32_t) + 3]=(m & 255);
 		if (OJPEGReadBlock(sp,m-2,&nb[sizeof(uint32_t) + 4]) == 0) {
-                        _TIFFfree(nb);
+                        _TIFFfreeExt(tif, nb);
 			return(0);
                 }
 		o=nb[sizeof(uint32_t) + 4];
@@ -1577,31 +1577,31 @@ OJPEGReadHeaderInfoSecStreamDht(TIFF* tif)
 		{
 			if (3<o)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DHT marker in JPEG data");
-                                _TIFFfree(nb);
+				TIFFErrorExtR(tif,module,"Corrupt DHT marker in JPEG data");
+                                _TIFFfreeExt(tif, nb);
 				return(0);
 			}
 			if (sp->dctable[o]!=0)
-				_TIFFfree(sp->dctable[o]);
+				_TIFFfreeExt(tif, sp->dctable[o]);
 			sp->dctable[o]=nb;
 		}
 		else
 		{
 			if ((o&240)!=16)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DHT marker in JPEG data");
-                                _TIFFfree(nb);
+				TIFFErrorExtR(tif,module,"Corrupt DHT marker in JPEG data");
+                                _TIFFfreeExt(tif, nb);
 				return(0);
 			}
 			o&=15;
 			if (3<o)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Corrupt DHT marker in JPEG data");
-                                _TIFFfree(nb);
+				TIFFErrorExtR(tif,module,"Corrupt DHT marker in JPEG data");
+                                _TIFFfreeExt(tif, nb);
 				return(0);
 			}
 			if (sp->actable[o]!=0)
-				_TIFFfree(sp->actable[o]);
+				_TIFFfreeExt(tif, sp->actable[o]);
 			sp->actable[o]=nb;
 		}
 	}
@@ -1621,7 +1621,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 	uint16_t q;
 	if (sp->sof_log!=0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Corrupt JPEG data");
+		TIFFErrorExtR(tif,module,"Corrupt JPEG data");
 		return(0);
 	}
 	if (sp->subsamplingcorrect==0)
@@ -1632,14 +1632,14 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 	if (m<11)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOF marker in JPEG data");
+			TIFFErrorExtR(tif,module,"Corrupt SOF marker in JPEG data");
 		return(0);
 	}
 	m-=8;
 	if (m%3!=0)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOF marker in JPEG data");
+			TIFFErrorExtR(tif,module,"Corrupt SOF marker in JPEG data");
 		return(0);
 	}
 	n=m/3;
@@ -1647,7 +1647,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 	{
 		if (n!=sp->samples_per_pixel)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected number of samples");
+			TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected number of samples");
 			return(0);
 		}
 	}
@@ -1657,7 +1657,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 	if (o!=8)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected number of bits per sample");
+			TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected number of bits per sample");
 		return(0);
 	}
 	/* Y: Number of lines, X: Number of samples per line */
@@ -1670,7 +1670,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 			return(0);
 		if (((uint32_t)p < sp->image_length) && ((uint32_t)p < sp->strile_length_total))
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected height");
+			TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected height");
 			return(0);
 		}
 		sp->sof_y=p;
@@ -1679,12 +1679,12 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 			return(0);
 		if (((uint32_t)p < sp->image_width) && ((uint32_t)p < sp->strile_width))
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected width");
+			TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected width");
 			return(0);
 		}
 		if ((uint32_t)p > sp->strile_width)
 		{
-			TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data image width exceeds expected image width");
+			TIFFErrorExtR(tif,module,"JPEG compressed data image width exceeds expected image width");
 			return(0);
 		}
 		sp->sof_x=p;
@@ -1695,7 +1695,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 	if (o!=n)
 	{
 		if (sp->subsamplingcorrect==0)
-			TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOF marker in JPEG data");
+			TIFFErrorExtR(tif,module,"Corrupt SOF marker in JPEG data");
 		return(0);
 	}
 	/* per component stuff */
@@ -1735,7 +1735,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 				{
 					if (o!=((sp->subsampling_hor<<4)|sp->subsampling_ver))
 					{
-						TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected subsampling values");
+						TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected subsampling values");
 						return(0);
 					}
 				}
@@ -1743,7 +1743,7 @@ OJPEGReadHeaderInfoSecStreamSof(TIFF* tif, uint8_t marker_id)
 				{
 					if (o!=17)
 					{
-						TIFFErrorExt(tif->tif_clientdata,module,"JPEG compressed data indicates unexpected subsampling values");
+						TIFFErrorExtR(tif,module,"JPEG compressed data indicates unexpected subsampling values");
 						return(0);
 					}
 				}
@@ -1772,7 +1772,7 @@ OJPEGReadHeaderInfoSecStreamSos(TIFF* tif)
 	assert(sp->subsamplingcorrect==0);
 	if (sp->sof_log==0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOS marker in JPEG data");
+		TIFFErrorExtR(tif,module,"Corrupt SOS marker in JPEG data");
 		return(0);
 	}
 	/* Ls */
@@ -1780,7 +1780,7 @@ OJPEGReadHeaderInfoSecStreamSos(TIFF* tif)
 		return(0);
 	if (m!=6+sp->samples_per_pixel_per_plane*2)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOS marker in JPEG data");
+		TIFFErrorExtR(tif,module,"Corrupt SOS marker in JPEG data");
 		return(0);
 	}
 	/* Ns */
@@ -1788,7 +1788,7 @@ OJPEGReadHeaderInfoSecStreamSos(TIFF* tif)
 		return(0);
 	if (n!=sp->samples_per_pixel_per_plane)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Corrupt SOS marker in JPEG data");
+		TIFFErrorExtR(tif,module,"Corrupt SOS marker in JPEG data");
 		return(0);
 	}
 	/* Cs, Td, and Ta */
@@ -1820,7 +1820,7 @@ OJPEGReadHeaderInfoSecTablesQTable(TIFF* tif)
 	uint32_t p;
 	if (sp->qtable_offset[0]==0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Missing JPEG tables");
+		TIFFErrorExtR(tif,module,"Missing JPEG tables");
 		return(0);
 	}
 	sp->in_buffer_file_pos_log=0;
@@ -1832,15 +1832,15 @@ OJPEGReadHeaderInfoSecTablesQTable(TIFF* tif)
 			{
 				if (sp->qtable_offset[m]==sp->qtable_offset[n])
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"Corrupt JpegQTables tag value");
+					TIFFErrorExtR(tif,module,"Corrupt JpegQTables tag value");
 					return(0);
 				}
 			}
 			oa= sizeof(uint32_t) + 69;
-			ob=_TIFFmalloc(oa);
+			ob=_TIFFmallocExt(tif, oa);
 			if (ob==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			*(uint32_t*)ob=oa;
@@ -1853,11 +1853,11 @@ OJPEGReadHeaderInfoSecTablesQTable(TIFF* tif)
 			p=(uint32_t)TIFFReadFile(tif, &ob[sizeof(uint32_t) + 5], 64);
 			if (p!=64)
                         {
-                                _TIFFfree(ob);
+                                _TIFFfreeExt(tif, ob);
 				return(0);
                         }
 			if (sp->qtable[m]!=0)
-				_TIFFfree(sp->qtable[m]);
+				_TIFFfreeExt(tif, sp->qtable[m]);
 			sp->qtable[m]=ob;
 			sp->sof_tq[m]=m;
 		}
@@ -1881,7 +1881,7 @@ OJPEGReadHeaderInfoSecTablesDcTable(TIFF* tif)
 	uint8_t* rb;
 	if (sp->dctable_offset[0]==0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Missing JPEG tables");
+		TIFFErrorExtR(tif,module,"Missing JPEG tables");
 		return(0);
 	}
 	sp->in_buffer_file_pos_log=0;
@@ -1893,7 +1893,7 @@ OJPEGReadHeaderInfoSecTablesDcTable(TIFF* tif)
 			{
 				if (sp->dctable_offset[m]==sp->dctable_offset[n])
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"Corrupt JpegDcTables tag value");
+					TIFFErrorExtR(tif,module,"Corrupt JpegDcTables tag value");
 					return(0);
 				}
 			}
@@ -1905,10 +1905,10 @@ OJPEGReadHeaderInfoSecTablesDcTable(TIFF* tif)
 			for (n=0; n<16; n++)
 				q+=o[n];
 			ra= sizeof(uint32_t) + 21 + q;
-			rb=_TIFFmalloc(ra);
+			rb=_TIFFmallocExt(tif, ra);
 			if (rb==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			*(uint32_t*)rb=ra;
@@ -1922,11 +1922,11 @@ OJPEGReadHeaderInfoSecTablesDcTable(TIFF* tif)
 			p=(uint32_t)TIFFReadFile(tif, &(rb[sizeof(uint32_t) + 21]), q);
 			if (p!=q)
                         {
-                                _TIFFfree(rb);
+                                _TIFFfreeExt(tif, rb);
 				return(0);
                         }
 			if (sp->dctable[m]!=0)
-				_TIFFfree(sp->dctable[m]);
+				_TIFFfreeExt(tif, sp->dctable[m]);
 			sp->dctable[m]=rb;
 			sp->sos_tda[m]=(m<<4);
 		}
@@ -1950,7 +1950,7 @@ OJPEGReadHeaderInfoSecTablesAcTable(TIFF* tif)
 	uint8_t* rb;
 	if (sp->actable_offset[0]==0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,"Missing JPEG tables");
+		TIFFErrorExtR(tif,module,"Missing JPEG tables");
 		return(0);
 	}
 	sp->in_buffer_file_pos_log=0;
@@ -1962,7 +1962,7 @@ OJPEGReadHeaderInfoSecTablesAcTable(TIFF* tif)
 			{
 				if (sp->actable_offset[m]==sp->actable_offset[n])
 				{
-					TIFFErrorExt(tif->tif_clientdata,module,"Corrupt JpegAcTables tag value");
+					TIFFErrorExtR(tif,module,"Corrupt JpegAcTables tag value");
 					return(0);
 				}
 			}
@@ -1974,10 +1974,10 @@ OJPEGReadHeaderInfoSecTablesAcTable(TIFF* tif)
 			for (n=0; n<16; n++)
 				q+=o[n];
 			ra= sizeof(uint32_t) + 21 + q;
-			rb=_TIFFmalloc(ra);
+			rb=_TIFFmallocExt(tif, ra);
 			if (rb==0)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Out of memory");
+				TIFFErrorExtR(tif,module,"Out of memory");
 				return(0);
 			}
 			*(uint32_t*)rb=ra;
@@ -1991,11 +1991,11 @@ OJPEGReadHeaderInfoSecTablesAcTable(TIFF* tif)
 			p=(uint32_t)TIFFReadFile(tif, &(rb[sizeof(uint32_t) + 21]), q);
 			if (p!=q)
                         {
-                                _TIFFfree(rb);
+                                _TIFFfreeExt(tif, rb);
 				return(0);
                         }
 			if (sp->actable[m]!=0)
-				_TIFFfree(sp->actable[m]);
+				_TIFFfreeExt(tif, sp->actable[m]);
 			sp->actable[m]=rb;
 			sp->sos_tda[m]=(sp->sos_tda[m]|m);
 		}
@@ -2544,7 +2544,7 @@ OJPEGLibjpegJpegErrorMgrOutputMessage(jpeg_common_struct* cinfo)
 {
 	char buffer[JMSG_LENGTH_MAX];
 	(*cinfo->err->format_message)(cinfo,buffer);
-	TIFFWarningExt(((TIFF*)(cinfo->client_data))->tif_clientdata,"LibJpeg","%s",buffer);
+	TIFFWarningExtR(((TIFF*)(cinfo->client_data)),"LibJpeg","%s",buffer);
 }
 
 static void
@@ -2552,7 +2552,7 @@ OJPEGLibjpegJpegErrorMgrErrorExit(jpeg_common_struct* cinfo)
 {
 	char buffer[JMSG_LENGTH_MAX];
 	(*cinfo->err->format_message)(cinfo,buffer);
-	TIFFErrorExt(((TIFF*)(cinfo->client_data))->tif_clientdata,"LibJpeg","%s",buffer);
+	TIFFErrorExtR(((TIFF*)(cinfo->client_data)),"LibJpeg","%s",buffer);
 	jpeg_encap_unwind((TIFF*)(cinfo->client_data));
 }
 
@@ -2571,7 +2571,7 @@ OJPEGLibjpegJpegSourceMgrFillInputBuffer(jpeg_decompress_struct* cinfo)
 	uint32_t len=0U;
 	if (OJPEGWriteStream(tif,&mem,&len)==0)
 	{
-		TIFFErrorExt(tif->tif_clientdata,"LibJpeg","Premature end of JPEG data");
+		TIFFErrorExtR(tif,"LibJpeg","Premature end of JPEG data");
 		jpeg_encap_unwind(tif);
 	}
 	sp->libjpeg_jpeg_source_mgr.bytes_in_buffer=len;
@@ -2584,7 +2584,7 @@ OJPEGLibjpegJpegSourceMgrSkipInputData(jpeg_decompress_struct* cinfo, long num_b
 {
 	TIFF* tif=(TIFF*)cinfo->client_data;
 	(void)num_bytes;
-	TIFFErrorExt(tif->tif_clientdata,"LibJpeg","Unexpected error");
+	TIFFErrorExtR(tif,"LibJpeg","Unexpected error");
 	jpeg_encap_unwind(tif);
 }
 
@@ -2597,7 +2597,7 @@ OJPEGLibjpegJpegSourceMgrResyncToRestart(jpeg_decompress_struct* cinfo, int desi
 {
 	TIFF* tif=(TIFF*)cinfo->client_data;
 	(void)desired;
-	TIFFErrorExt(tif->tif_clientdata,"LibJpeg","Unexpected error");
+	TIFFErrorExtR(tif,"LibJpeg","Unexpected error");
 	jpeg_encap_unwind(tif);
 	return(0);
 }

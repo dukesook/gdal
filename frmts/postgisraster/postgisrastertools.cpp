@@ -34,7 +34,6 @@
  **********************************************************************/
  #include "postgisraster.h"
 
-CPL_CVSID("$Id$")
 
  /**********************************************************************
  * \brief Replace the quotes by single quotes in the input string
@@ -117,14 +116,10 @@ char** ParseConnectionString(const char * pszConnectionString) {
  * GDALDataType object.
  **********************************************************************/
 GBool TranslateDataType(const char * pszDataType,
-        GDALDataType * poDataType = nullptr, int * pnBitsDepth = nullptr,
-        GBool * pbSignedByte = nullptr)
+        GDALDataType * poDataType = nullptr, int * pnBitsDepth = nullptr)
 {
     if (!pszDataType)
         return false;
-
-    if (pbSignedByte)
-        *pbSignedByte = false;
 
     if (EQUAL(pszDataType, "1BB")) {
         if (pnBitsDepth)
@@ -158,15 +153,7 @@ GBool TranslateDataType(const char * pszDataType,
         if (pnBitsDepth)
             *pnBitsDepth = 8;
         if (poDataType)
-            *poDataType = GDT_Byte;
-
-        /**
-         * To indicate the unsigned byte values between 128 and 255
-         * should be interpreted as being values between -128 and -1 for
-         * applications that recognize the SIGNEDBYTE type.
-         **/
-        if (pbSignedByte)
-            *pbSignedByte = true;
+            *poDataType = GDT_Int8;
     }
     else if (EQUAL(pszDataType, "16BSI")) {
         if (pnBitsDepth)

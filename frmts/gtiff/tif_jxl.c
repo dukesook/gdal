@@ -98,9 +98,22 @@ static int GetJXLDataType(TIFF* tif)
         return JXL_TYPE_FLOAT;
     }
 
-    TIFFErrorExt(tif->tif_clientdata, module,
+    TIFFErrorExtR(tif, module,
         "Unsupported combination of SampleFormat and BitsPerSample");
     return -1;
+}
+static int GetJXLDataTypeSize(JxlDataType dtype) {
+    switch (dtype)
+    {
+    case JXL_TYPE_UINT8:
+        return 1;
+    case JXL_TYPE_UINT16:
+        return 2;
+    case JXL_TYPE_FLOAT:
+        return 4;
+    default:
+        return 0;
+    }
 }
 
 static int
@@ -147,8 +160,15 @@ static int SetupUncompressedBuffer(TIFF* tif, JXLState* sp,
                 sp->segment_height = td->td_rowsperstrip;
     }
 
-    new_size_64 = (uint64_t)sp->segment_width * sp->segment_height *
-                                        (td->td_bitspersample / 8);
+    JxlDataType dtype = GetJXLDataType(tif);
+    if(dtype<0) {
+        _TIFFfreeExt(tif, sp->uncompressed_buffer);
+        sp->uncompressed_buffer = 0;
+        sp->uncompressed_alloc = 0;
+        return 0;
+    }
+    int nBytesPerSample = GetJXLDataTypeSize(dtype);
+    new_size_64 = (uint64_t)sp->segment_width * sp->segment_height * nBytesPerSample;
     if( td->td_planarconfig == PLANARCONFIG_CONTIG )
     {
         new_size_64 *= td->td_samplesperpixel;
@@ -162,9 +182,9 @@ static int SetupUncompressedBuffer(TIFF* tif, JXLState* sp,
     new_alloc = (unsigned int)new_alloc_64;
     if( new_alloc != new_alloc_64 )
     {
-        TIFFErrorExt(tif->tif_clientdata, module,
+        TIFFErrorExtR(tif, module,
                         "Too large uncompressed strip/tile");
-        _TIFFfree(sp->uncompressed_buffer);
+        _TIFFfreeExt(tif, sp->uncompressed_buffer);
         sp->uncompressed_buffer = 0;
         sp->uncompressed_alloc = 0;
         return 0;
@@ -172,13 +192,13 @@ static int SetupUncompressedBuffer(TIFF* tif, JXLState* sp,
 
     if( sp->uncompressed_alloc < new_alloc )
     {
-        _TIFFfree(sp->uncompressed_buffer);
-        sp->uncompressed_buffer = _TIFFmalloc(new_alloc);
+        _TIFFfreeExt(tif, sp->uncompressed_buffer);
+        sp->uncompressed_buffer = _TIFFmallocExt(tif, new_alloc);
         if( !sp->uncompressed_buffer )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                             "Cannot allocate buffer");
-            _TIFFfree(sp->uncompressed_buffer);
+            _TIFFfreeExt(tif, sp->uncompressed_buffer);
             sp->uncompressed_buffer = 0;
             sp->uncompressed_alloc = 0;
             return 0;
@@ -216,7 +236,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
             sp->decoder = JxlDecoderCreate(NULL);
             if( sp->decoder == NULL )
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                             "JxlDecoderCreate() failed");
                 return 0;
             }
@@ -231,7 +251,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
                             sp->decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE);
         if( status != JXL_DEC_SUCCESS )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderSubscribeEvents() failed");
             return 0;
         }
@@ -241,7 +261,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
                                     (size_t)tif->tif_rawcc);
         if( status != JXL_DEC_SUCCESS )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderSetInput() failed with %d", status);
             return 0;
         }
@@ -249,7 +269,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
         status = JxlDecoderProcessInput(sp->decoder);
         if( status != JXL_DEC_BASIC_INFO )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderProcessInput() failed with %d", status);
             JxlDecoderReleaseInput(sp->decoder);
             return 0;
@@ -259,7 +279,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
         status = JxlDecoderGetBasicInfo(sp->decoder, &info);
         if( status != JXL_DEC_SUCCESS )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderGetBasicInfo() failed with %d", status);
             JxlDecoderReleaseInput(sp->decoder);
             return 0;
@@ -267,7 +287,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
 
         if( sp->segment_width != info.xsize )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JXL basic info xsize = %d, whereas %u was expected",
                          info.xsize, sp->segment_width);
             JxlDecoderReleaseInput(sp->decoder);
@@ -276,7 +296,7 @@ JXLPreDecode(TIFF* tif, uint16_t s)
 
         if( sp->segment_height != info.ysize )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JXL basic info ysize = %d, whereas %u was expected",
                          info.ysize, sp->segment_height);
             JxlDecoderReleaseInput(sp->decoder);
@@ -285,52 +305,230 @@ JXLPreDecode(TIFF* tif, uint16_t s)
 
         if( td->td_bitspersample != info.bits_per_sample )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JXL basic info bits_per_sample = %d, whereas %d was expected",
                          info.bits_per_sample, td->td_bitspersample);
             JxlDecoderReleaseInput(sp->decoder);
             return 0;
         }
 
+        if (td->td_planarconfig == PLANARCONFIG_CONTIG)
+        {
+            if( info.num_color_channels + info.num_extra_channels != td->td_samplesperpixel ) {
+                TIFFErrorExtR(tif, module,
+                             "JXL basic info invalid number of channels");
+                JxlDecoderReleaseInput(sp->decoder);
+                return 0;
+            }
+        } else
+        {
+            if( info.num_color_channels!=1 || info.alpha_bits>0 || info.num_extra_channels>0) {
+                TIFFErrorExtR(tif, module,
+                             "JXL basic info invalid number of channels");
+                JxlDecoderReleaseInput(sp->decoder);
+                return 0;
+            }
+
+        }
+
         JxlPixelFormat format = {0};
-        format.num_channels = td->td_planarconfig == PLANARCONFIG_CONTIG ?
-                                                    td->td_samplesperpixel : 1;
         format.data_type = jxlDataType;
         format.endianness = JXL_NATIVE_ENDIAN;
         format.align = 0;
+        // alpha_bits is set even for a gray, gray, Alpha, gray, gray
+        // or for R, G, B, undefined, Alpha
+        // Probably a defect of libjxl: https://github.com/libjxl/libjxl/issues/1773
+        // So for num_color_channels==3, num_color_channels > 1 and
+        // alpha_bits != 0, get information of the first extra channel to
+        // check if it is alpha, to detect R, G, B, Alpha, undefined.
+        // Note: there's no difference in the codestream if writing RGBAU
+        // as num_channels == 3 with 2 extra channels the first one being
+        // explicitly set to alpha, or with num_channels == 4.
+        int bAlphaEmbedded = 0;
+        if( info.alpha_bits !=0 )
+        {
+            if( (info.num_color_channels==3 || info.num_color_channels==1) &&
+                (info.num_extra_channels==1) )
+            {
+                bAlphaEmbedded = 1;
+            }
+            else if( info.num_color_channels==3 && info.num_extra_channels > 1 )
+            {
+                JxlExtraChannelInfo extra_channel_info;
+                memset(&extra_channel_info, 0, sizeof(extra_channel_info));
+                if( JxlDecoderGetExtraChannelInfo(sp->decoder, 0, &extra_channel_info) == JXL_DEC_SUCCESS &&
+                    extra_channel_info.type == JXL_CHANNEL_ALPHA )
+                {
+                    bAlphaEmbedded = 1;
+                }
+            }
+        }
+        uint32_t nFirstExtraChannel = (bAlphaEmbedded)?1:0;
+        size_t main_buffer_size = sp->uncompressed_size;
+        size_t channel_size = main_buffer_size / td->td_samplesperpixel;
+        uint8_t *extra_channel_buffer = NULL;
+
+        int nBytesPerSample = GetJXLDataTypeSize(format.data_type);
+
+        if( nFirstExtraChannel < info.num_extra_channels ){
+            int nExtraChannelsToExtract = info.num_extra_channels - nFirstExtraChannel;
+            format.num_channels=1;
+            main_buffer_size = channel_size * (info.num_color_channels + (bAlphaEmbedded?1:0));
+            extra_channel_buffer = _TIFFmallocExt(tif, channel_size*nExtraChannelsToExtract);
+            if( extra_channel_buffer == NULL )
+                return 0;
+            for( int i = 0; i < nExtraChannelsToExtract; ++i )
+            {
+                size_t buffer_size;
+                const int iCorrectedIdx = i+nFirstExtraChannel;
+
+                if( JxlDecoderExtraChannelBufferSize(sp->decoder, &format, &buffer_size, iCorrectedIdx)
+                        != JXL_DEC_SUCCESS  )
+                {
+                    TIFFErrorExtR(tif, module,
+                             "JxlDecoderExtraChannelBufferSize failed()");
+                    _TIFFfreeExt(tif, extra_channel_buffer);
+                    return 0;
+                }
+                if( buffer_size != channel_size )
+                {
+                    TIFFErrorExtR(tif, module,
+                             "JxlDecoderExtraChannelBufferSize returned %ld, expecting %ld",
+                             buffer_size,channel_size);
+                    _TIFFfreeExt(tif, extra_channel_buffer);
+                    return 0;
+                }
+
+#if 0
+                // Check consistency of JXL codestream header regarding
+                // extra alpha channels and TIFF ExtraSamples tag
+                JxlExtraChannelInfo extra_channel_info;
+                memset(&extra_channel_info, 0, sizeof(extra_channel_info));
+                if( JxlDecoderGetExtraChannelInfo(sp->decoder, iCorrectedIdx, &extra_channel_info) == JXL_DEC_SUCCESS )
+                {
+                    if( extra_channel_info.type == JXL_CHANNEL_ALPHA &&
+                        !extra_channel_info.alpha_premultiplied )
+                    {
+                        if( iCorrectedIdx < td->td_extrasamples &&
+                            td->td_sampleinfo[iCorrectedIdx] == EXTRASAMPLE_UNASSALPHA )
+                        {
+                            // ok
+                        }
+                        else
+                        {
+                            TIFFWarningExtR(tif, module,
+                                           "Unpremultiplied alpha channel expected from JXL codestream "
+                                           "in extra channel %d, but other value found in ExtraSamples tag", iCorrectedIdx);
+                        }
+                    }
+                    else if( extra_channel_info.type == JXL_CHANNEL_ALPHA &&
+                             extra_channel_info.alpha_premultiplied )
+                    {
+                        if( iCorrectedIdx < td->td_extrasamples &&
+                            td->td_sampleinfo[iCorrectedIdx] == EXTRASAMPLE_ASSOCALPHA )
+                        {
+                            // ok
+                        }
+                        else
+                        {
+                            TIFFWarningExtR(tif, module,
+                                           "Premultiplied alpha channel expected from JXL codestream "
+                                           "in extra channel %d, but other value found in ExtraSamples tag", iCorrectedIdx);
+                        }
+                    }
+                    else if( iCorrectedIdx < td->td_extrasamples &&
+                             td->td_sampleinfo[iCorrectedIdx] == EXTRASAMPLE_UNASSALPHA )
+                    {
+                        TIFFWarningExtR(tif, module,
+                                       "Unpremultiplied alpha channel expected from ExtraSamples tag "
+                                       "in extra channel %d, but other value found in JXL codestream", iCorrectedIdx);
+                    }
+                    else if( iCorrectedIdx < td->td_extrasamples &&
+                             td->td_sampleinfo[iCorrectedIdx] == EXTRASAMPLE_ASSOCALPHA )
+                    {
+                        TIFFWarningExtR(tif, module,
+                                       "Premultiplied alpha channel expected from ExtraSamples tag "
+                                       "in extra channel %d, but other value found in JXL codestream", iCorrectedIdx);
+                    }
+                }
+#endif
+                if( JxlDecoderSetExtraChannelBuffer(
+                        sp->decoder, &format,
+                        extra_channel_buffer+i*channel_size,
+                        channel_size, i+nFirstExtraChannel)
+                        != JXL_DEC_SUCCESS )
+                {
+                    TIFFErrorExtR(tif, module,
+                             "JxlDecoderSetExtraChannelBuffer failed()");
+                    _TIFFfreeExt(tif, extra_channel_buffer);
+                    return 0;
+                }
+            }
+        }
+
+        format.num_channels = info.num_color_channels;
+        if( bAlphaEmbedded ) format.num_channels++;
 
         status = JxlDecoderProcessInput(sp->decoder);
         if( status != JXL_DEC_NEED_IMAGE_OUT_BUFFER )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderProcessInput() (second call) failed with %d", status);
             JxlDecoderReleaseInput(sp->decoder);
+            _TIFFfreeExt(tif, extra_channel_buffer);
             return 0;
         }
 
         status = JxlDecoderSetImageOutBuffer(sp->decoder, &format,
-                                             sp->uncompressed_buffer, sp->uncompressed_size);
+                                             sp->uncompressed_buffer, main_buffer_size);
         if( status != JXL_DEC_SUCCESS )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderSetImageOutBuffer() failed with %d", status);
             JxlDecoderReleaseInput(sp->decoder);
+            _TIFFfreeExt(tif, extra_channel_buffer);
             return 0;
         }
 
         status = JxlDecoderProcessInput(sp->decoder);
         if( status != JXL_DEC_FULL_IMAGE )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderProcessInput() (third call) failed with %d", status);
             JxlDecoderReleaseInput(sp->decoder);
+            _TIFFfreeExt(tif, extra_channel_buffer);
             return 0;
+        }
+        if( nFirstExtraChannel < info.num_extra_channels ){
+            //first reorder the main buffer
+            int nMainChannels = bAlphaEmbedded?info.num_color_channels+1:info.num_color_channels;
+            int mainPixSize = nMainChannels*nBytesPerSample;
+            int fullPixSize = td->td_samplesperpixel*nBytesPerSample;
+            unsigned int outOff = sp->uncompressed_size - fullPixSize;
+            int inOff = main_buffer_size - mainPixSize;
+            for(;inOff>=0;inOff-=mainPixSize,outOff-=fullPixSize)
+            {
+                memcpy(sp->uncompressed_buffer+outOff,sp->uncompressed_buffer+inOff,mainPixSize);
+            }
+            //then copy over the data from the extra_channel_buffer
+            int nExtraChannelsToExtract = info.num_extra_channels - nFirstExtraChannel;
+            for( int i = 0; i < nExtraChannelsToExtract; ++i )
+            {
+                outOff = (i+nMainChannels)*nBytesPerSample;
+                uint8_t *channel_buffer = extra_channel_buffer+i*channel_size;
+                for(;outOff<sp->uncompressed_size;outOff+=fullPixSize,channel_buffer+=nBytesPerSample) {
+                    memcpy(sp->uncompressed_buffer+outOff,
+                    channel_buffer,
+                    nBytesPerSample);
+                }
+            }
+            _TIFFfreeExt(tif, extra_channel_buffer);
         }
 
         /*const size_t nRemaining = */ JxlDecoderReleaseInput(sp->decoder);
         /*if( nRemaining != 0 )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlDecoderReleaseInput(): %u input bytes remaining",
                          (unsigned)nRemaining);
         }*/
@@ -353,7 +551,7 @@ JXLDecode(TIFF* tif, uint8_t* op, tmsize_t occ, uint16_t s)
 
         if( sp->uncompressed_buffer == 0 )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "Uncompressed buffer not allocated");
             return 0;
         }
@@ -361,7 +559,7 @@ JXLDecode(TIFF* tif, uint8_t* op, tmsize_t occ, uint16_t s)
         if( (uint64_t)sp->uncompressed_offset +
                                         (uint64_t)occ > sp->uncompressed_size )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "Too many bytes read");
             return 0;
         }
@@ -384,6 +582,9 @@ JXLSetupEncode(TIFF* tif)
             sp->state = 0;
         }
 
+        if( GetJXLDataType(tif) < 0 )
+            return 0;
+
         sp->state |= LSTATE_INIT_ENCODE;
 
         return 1;
@@ -397,23 +598,12 @@ JXLPreEncode(TIFF* tif, uint16_t s)
 {
         static const char module[] = "JXLPreEncode";
         JXLState *sp = EncoderState(tif);
-        TIFFDirectory *td = &tif->tif_dir;
 
         (void) s;
         assert(sp != NULL);
         if( sp->state != LSTATE_INIT_ENCODE )
             tif->tif_setupencode(tif);
 
-        if( td->td_planarconfig == PLANARCONFIG_CONTIG &&
-            td->td_samplesperpixel > 4 )
-        {
-            TIFFErrorExt(tif->tif_clientdata, module,
-                "JXL: INTERLEAVE=PIXEL supports a maximum of 4 bands (%d provided)", td->td_samplesperpixel);
-            return 0;
-        }
-
-        if( GetJXLDataType(tif) < 0 )
-            return 0;
 
         if( !SetupUncompressedBuffer(tif, sp, module) )
             return 0;
@@ -437,7 +627,7 @@ JXLEncode(TIFF* tif, uint8_t* bp, tmsize_t cc, uint16_t s)
         if( (uint64_t)sp->uncompressed_offset +
                                     (uint64_t)cc > sp->uncompressed_size )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "Too many bytes written");
             return 0;
         }
@@ -461,7 +651,7 @@ JXLPostEncode(TIFF* tif)
 
         if( sp->uncompressed_offset != sp->uncompressed_size )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "Unexpected number of bytes in the buffer");
             return 0;
         }
@@ -469,7 +659,7 @@ JXLPostEncode(TIFF* tif)
         JxlEncoder *enc = JxlEncoderCreate(NULL);
         if( enc == NULL )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlEncoderCreate() failed");
             return 0;
         }
@@ -482,7 +672,7 @@ JXLPostEncode(TIFF* tif)
 #endif
         if( opts == NULL )
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlEncoderFrameSettingsCreate() failed");
             JxlEncoderDestroy(enc);
             return 0;
@@ -494,7 +684,7 @@ JXLPostEncode(TIFF* tif)
         format.align = 0;
 
 #ifdef HAVE_JxlEncoderSetCodestreamLevel
-        if( sp->lossless && td->td_bitspersample > 12 )
+        if( td->td_bitspersample > 12 )
         {
             JxlEncoderSetCodestreamLevel(enc, 10);
         }
@@ -511,6 +701,8 @@ JXLPostEncode(TIFF* tif)
             basic_info.exponent_bits_per_sample=0;
         }
 
+        int bAlphaEmbedded = 0;
+
         if(td->td_planarconfig == PLANARCONFIG_SEPARATE) {
             format.num_channels = 1;
             basic_info.num_color_channels = 1;
@@ -518,38 +710,56 @@ JXLPostEncode(TIFF* tif)
             basic_info.alpha_bits = 0;
             basic_info.alpha_exponent_bits=0;
         } else {
-            format.num_channels = td->td_samplesperpixel;
-            switch(td->td_samplesperpixel) {
-                case 1:
-                    format.num_channels = 1;
-                    basic_info.num_color_channels = 1;
-                    basic_info.num_extra_channels = 0;
-                    basic_info.alpha_bits = 0;
-                    basic_info.alpha_exponent_bits = 0;
-                    break;
-                case 2:
-                    format.num_channels = 2;
-                    basic_info.num_color_channels = 1;
-                    basic_info.num_extra_channels = 1;
-                    basic_info.alpha_bits = td->td_bitspersample;
-                    basic_info.alpha_exponent_bits = basic_info.exponent_bits_per_sample;
-                    break;
-                case 3:
-                    format.num_channels = 3;
-                    basic_info.num_color_channels = 3;
-                    basic_info.num_extra_channels = 0;
-                    basic_info.alpha_bits = 0;
-                    basic_info.alpha_exponent_bits = 0;
-                    break;
-                case 4:
-                    format.num_channels = 4;
-                    basic_info.num_color_channels = 3;
-                    basic_info.num_extra_channels = 1;
-                    basic_info.alpha_bits = td->td_bitspersample;
-                    basic_info.alpha_exponent_bits = basic_info.exponent_bits_per_sample;
-                    break;
+            if(td->td_photometric == PHOTOMETRIC_MINISBLACK &&
+                    td->td_extrasamples > 0 &&
+                    td->td_extrasamples == td->td_samplesperpixel-1 &&
+                    td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA) { //gray with alpha
+                format.num_channels = 2;
+                basic_info.num_color_channels = 1;
+                basic_info.num_extra_channels = td->td_extrasamples;
+                basic_info.alpha_bits = td->td_bitspersample;
+                basic_info.alpha_exponent_bits = basic_info.exponent_bits_per_sample;
+                bAlphaEmbedded=1;
+            } else if(td->td_photometric == PHOTOMETRIC_RGB &&
+                    td->td_extrasamples > 0 &&
+                    td->td_extrasamples == td->td_samplesperpixel-3 &&
+                    td->td_sampleinfo[0] == EXTRASAMPLE_UNASSALPHA) { //rgb with alpha
+                format.num_channels = 4;
+                basic_info.num_color_channels = 3;
+                basic_info.num_extra_channels = td->td_samplesperpixel-3;
+                basic_info.alpha_bits = td->td_bitspersample;
+                basic_info.alpha_exponent_bits = basic_info.exponent_bits_per_sample;
+                bAlphaEmbedded=1;
+            } else if (td->td_photometric == PHOTOMETRIC_RGB &&
+                      ((td->td_extrasamples == 0) ||
+                       (td->td_extrasamples > 0 &&
+                        td->td_extrasamples == td->td_samplesperpixel - 3 &&
+                        td->td_sampleinfo[0] != EXTRASAMPLE_UNASSALPHA)))
+            { // rgb without alpha
+                format.num_channels = 3;
+                basic_info.num_color_channels = 3;
+                basic_info.num_extra_channels = td->td_samplesperpixel-3;
+                basic_info.alpha_bits = 0;
+                basic_info.alpha_exponent_bits = 0;
+            } else
+            { // fallback to gray without alpha and with eventual extra channels
+                format.num_channels = 1;
+                basic_info.num_color_channels = 1;
+                basic_info.num_extra_channels = td->td_samplesperpixel - 1;
+                basic_info.alpha_bits = 0;
+                basic_info.alpha_exponent_bits = 0;
             }
+#ifndef HAVE_JxlExtraChannels
+            if (basic_info.num_extra_channels > 1 ||
+                (basic_info.num_extra_channels == 1 && !bAlphaEmbedded))
+            {
+                TIFFErrorExtR(tif, module,
+                             "JXL: INTERLEAVE=PIXEL does not support this combination of bands. Please upgrade libjxl to 0.8+");
+                return 0;
+            }
+#endif
         }
+
 
         if( sp->lossless )
         {
@@ -569,7 +779,7 @@ JXLPostEncode(TIFF* tif)
             if( JxlEncoderOptionsSetDistance(opts, sp->distance) != JXL_ENC_SUCCESS )
 #endif
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                             "JxlEncoderSetFrameDistance() failed");
                 JxlEncoderDestroy(enc);
                 return 0;
@@ -581,7 +791,7 @@ JXLPostEncode(TIFF* tif)
         if( JxlEncoderOptionsSetEffort(opts, sp->effort) != JXL_ENC_SUCCESS )
 #endif
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlEncoderFrameSettingsSetOption() failed");
             JxlEncoderDestroy(enc);
             return 0;
@@ -590,7 +800,7 @@ JXLPostEncode(TIFF* tif)
 
         if (JXL_ENC_SUCCESS != JxlEncoderSetBasicInfo(enc, &basic_info))
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                          "JxlEncoderSetBasicInfo() failed");
             JxlEncoderDestroy(enc);
             return 0;
@@ -599,23 +809,124 @@ JXLPostEncode(TIFF* tif)
         JxlColorEncoding color_encoding = {0};
         JxlColorEncodingSetToSRGB(&color_encoding, /*is_gray*/
             (td->td_planarconfig==PLANARCONFIG_SEPARATE ||
-            td->td_samplesperpixel <= 2));
+            basic_info.num_color_channels == 1));
         if (JXL_ENC_SUCCESS != JxlEncoderSetColorEncoding(enc, &color_encoding))
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                         "JxlEncoderSetColorEncoding() failed");
             JxlEncoderDestroy(enc);
             return 0;
         }
 
-        if( JxlEncoderAddImageFrame(opts, &format, sp->uncompressed_buffer,
-                                    sp->uncompressed_size) != JXL_ENC_SUCCESS )
+        uint8_t *main_buffer = sp->uncompressed_buffer;
+        unsigned int main_size = sp->uncompressed_size;
+
+#ifdef HAVE_JxlExtraChannels
+        int nBytesPerSample = GetJXLDataTypeSize(format.data_type);
+        if (td->td_planarconfig == PLANARCONFIG_CONTIG &&
+            (basic_info.num_extra_channels > 1 ||
+             (basic_info.num_extra_channels == 1 && !bAlphaEmbedded)))
         {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            main_size = (sp->uncompressed_size / td->td_samplesperpixel);
+            int nMainChannels = basic_info.num_color_channels;
+            if(bAlphaEmbedded) nMainChannels++;
+            main_size *= nMainChannels;
+            main_buffer = _TIFFmallocExt(tif, main_size);
+            if( main_buffer == NULL )
+                return 0;
+            int outChunkSize = nBytesPerSample * nMainChannels;
+            int inStep = nBytesPerSample * td->td_samplesperpixel;
+            uint8_t *cur_outbuffer=main_buffer;
+            uint8_t *cur_inbuffer=sp->uncompressed_buffer;
+            for( ; cur_outbuffer-main_buffer<main_size ; cur_outbuffer+=outChunkSize, cur_inbuffer+=inStep  ) {
+                memcpy(cur_outbuffer,cur_inbuffer,outChunkSize);
+            }
+            for(int iChannel=nMainChannels; iChannel<td->td_samplesperpixel; iChannel++)
+            {
+                JxlExtraChannelInfo extra_channel_info;
+                int channelType = JXL_CHANNEL_OPTIONAL;
+                const int iExtraChannel = iChannel - nMainChannels + bAlphaEmbedded;
+                if( iExtraChannel < td->td_extrasamples &&
+                    (td->td_sampleinfo[iExtraChannel] == EXTRASAMPLE_UNASSALPHA ||
+                     td->td_sampleinfo[iExtraChannel] == EXTRASAMPLE_ASSOCALPHA))
+                {
+                    channelType = JXL_CHANNEL_ALPHA;
+                }
+                JxlEncoderInitExtraChannelInfo(channelType,
+                                               &extra_channel_info);
+                extra_channel_info.bits_per_sample = basic_info.bits_per_sample;
+                extra_channel_info.exponent_bits_per_sample = basic_info.exponent_bits_per_sample;
+                if( iExtraChannel < td->td_extrasamples &&
+                    td->td_sampleinfo[iExtraChannel] == EXTRASAMPLE_ASSOCALPHA )
+                {
+                    extra_channel_info.alpha_premultiplied = JXL_TRUE;
+                }
+
+                if (JXL_ENC_SUCCESS != JxlEncoderSetExtraChannelInfo(
+                    enc,
+                    iExtraChannel, &extra_channel_info))
+                {
+                    TIFFErrorExtR(tif, module,
+                                 "JxlEncoderSetExtraChannelInfo(%d) failed",iChannel);
+                    JxlEncoderDestroy(enc);
+                    _TIFFfreeExt(tif, main_buffer);
+                    return 0;
+                }
+            }
+        }
+#endif
+
+
+        int retCode = JxlEncoderAddImageFrame(opts, &format, main_buffer, main_size);
+        //cleanup now
+        if(main_buffer!=sp->uncompressed_buffer) {
+            _TIFFfreeExt(tif, main_buffer);
+        }
+        if( retCode != JXL_ENC_SUCCESS )
+        {
+            TIFFErrorExtR(tif, module,
                          "JxlEncoderAddImageFrame() failed");
             JxlEncoderDestroy(enc);
             return 0;
         }
+
+#ifdef HAVE_JxlExtraChannels
+        if (td->td_planarconfig == PLANARCONFIG_CONTIG &&
+            (basic_info.num_extra_channels > 1 ||
+             (basic_info.num_extra_channels == 1 && !bAlphaEmbedded)))
+        {
+            int nMainChannels = basic_info.num_color_channels;
+            if(bAlphaEmbedded) nMainChannels++;
+            int extra_channel_size = (sp->uncompressed_size / td->td_samplesperpixel);
+            uint8_t *extra_channel_buffer = _TIFFmallocExt(tif, extra_channel_size);
+            if( extra_channel_buffer == NULL )
+                return 0;
+            int inStep = nBytesPerSample * td->td_samplesperpixel;
+            int outStep = nBytesPerSample;
+            for(int iChannel=nMainChannels; iChannel<td->td_samplesperpixel; iChannel++)
+            {
+                uint8_t *cur_outbuffer = extra_channel_buffer;
+                uint8_t *cur_inbuffer = sp->uncompressed_buffer+iChannel*outStep;
+                for (; cur_outbuffer - extra_channel_buffer < extra_channel_size; cur_outbuffer += outStep, cur_inbuffer += inStep)
+                {
+                    memcpy(cur_outbuffer, cur_inbuffer, outStep);
+                }
+                if (JxlEncoderSetExtraChannelBuffer(
+                        opts, &format, extra_channel_buffer, extra_channel_size,
+                        (bAlphaEmbedded)?iChannel-nMainChannels+1:iChannel-nMainChannels) != JXL_ENC_SUCCESS)
+                {
+                    TIFFErrorExtR(tif, module,
+                                 "JxlEncoderSetExtraChannelBuffer() failed");
+                    _TIFFfreeExt(tif, extra_channel_buffer);
+                    JxlEncoderDestroy(enc);
+                    return 0;
+                }
+            }
+            _TIFFfreeExt(tif, extra_channel_buffer);
+        }
+#endif
+
+
         JxlEncoderCloseInput(enc);
 
         while( TRUE )
@@ -625,7 +936,7 @@ JXLPostEncode(TIFF* tif)
             JxlEncoderStatus process_result = JxlEncoderProcessOutput(enc, &buf, &len);
             if( process_result == JXL_ENC_ERROR )
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                          "JxlEncoderProcessOutput() failed");
                 JxlEncoderDestroy(enc);
                 return 0;
@@ -654,12 +965,12 @@ JXLCleanup(TIFF* tif)
         tif->tif_tagmethods.vgetfield = sp->vgetparent;
         tif->tif_tagmethods.vsetfield = sp->vsetparent;
 
-        _TIFFfree(sp->uncompressed_buffer);
+        _TIFFfreeExt(tif, sp->uncompressed_buffer);
 
         if( sp->decoder )
             JxlDecoderDestroy(sp->decoder);
 
-        _TIFFfree(sp);
+        _TIFFfreeExt(tif, sp);
         tif->tif_data = NULL;
 
         _TIFFSetDefaultCompressionState(tif);
@@ -693,7 +1004,7 @@ JXLVSetField(TIFF* tif, uint32_t tag, va_list ap)
                     sp->lossless = FALSE;
                 else
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                             "Invalid value for Lossyness: %u", lossyness);
                     return 0;
                 }
@@ -705,7 +1016,7 @@ JXLVSetField(TIFF* tif, uint32_t tag, va_list ap)
                 uint32_t effort = va_arg(ap, uint32_t);
                 if( effort < 1 || effort > 9)
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                             "Invalid value for Effort: %u", effort);
                     return 0;
                 }
@@ -718,7 +1029,7 @@ JXLVSetField(TIFF* tif, uint32_t tag, va_list ap)
                 float distance = (float)va_arg(ap, double);
                 if( distance < 0 || distance > 15)
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                             "Invalid value for Distance: %f", distance);
                     return 0;
                 }
@@ -767,7 +1078,7 @@ int TIFFInitJXL(TIFF* tif, int scheme)
         * Merge codec-specific tag information.
         */
         if (!_TIFFMergeFields(tif, JXLFields, TIFFArrayCount(JXLFields))) {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                             "Merging JXL codec-specific tags failed");
                 return 0;
         }
@@ -775,7 +1086,7 @@ int TIFFInitJXL(TIFF* tif, int scheme)
         /*
         * Allocate state block so tag methods have storage to record values.
         */
-        tif->tif_data = (uint8_t*) _TIFFcalloc(1, sizeof(JXLState));
+        tif->tif_data = (uint8_t*) _TIFFcallocExt(tif, 1, sizeof(JXLState));
         if (tif->tif_data == NULL)
                 goto bad;
         sp = LState(tif);
@@ -815,7 +1126,7 @@ int TIFFInitJXL(TIFF* tif, int scheme)
 
         return 1;
 bad:
-        TIFFErrorExt(tif->tif_clientdata, module,
+        TIFFErrorExtR(tif, module,
                     "No space for JXL state block");
         return 0;
 }

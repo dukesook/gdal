@@ -44,7 +44,7 @@ _tiffDummyUnmapProc(thandle_t fd, void* base, toff_t size)
 }
 
 int
-_TIFFgetMode(const char* mode, const char* module)
+_TIFFgetMode(TIFFOpenOptions* opts, thandle_t clientdata, const char* mode, const char* module)
 {
 	int m = -1;
 
@@ -61,11 +61,97 @@ _TIFFgetMode(const char* mode, const char* module)
 			m |= O_TRUNC;
 		break;
 	default:
-		TIFFErrorExt(0, module, "\"%s\": Bad mode", mode);
+		_TIFFErrorEarly(opts, clientdata, module, "\"%s\": Bad mode", mode);
 		break;
 	}
 	return (m);
 }
+
+TIFFOpenOptions* TIFFOpenOptionsAlloc()
+{
+    TIFFOpenOptions* opts = (TIFFOpenOptions*)_TIFFcalloc(1, sizeof(TIFFOpenOptions));
+    return opts;
+}
+
+void TIFFOpenOptionsFree(TIFFOpenOptions* opts)
+{
+    _TIFFfree(opts);
+}
+
+/** Define a limit in bytes for a single memory allocation done by libtiff.
+ *  If max_single_mem_alloc is set to 0, no other limit that the underlying
+ *  _TIFFmalloc() will be applied, which is the default.
+ */
+void TIFFOpenOptionsSetMaxSingleMemAlloc(TIFFOpenOptions* opts, tmsize_t max_single_mem_alloc)
+{
+    opts->max_single_mem_alloc = max_single_mem_alloc;
+}
+
+void TIFFOpenOptionsSetErrorHandlerExtR(TIFFOpenOptions* opts, TIFFErrorHandlerExtR handler, void* errorhandler_user_data)
+{
+    opts->errorhandler = handler;
+    opts->errorhandler_user_data = errorhandler_user_data;
+}
+
+void TIFFOpenOptionsSetWarningHandlerExtR(TIFFOpenOptions* opts, TIFFErrorHandlerExtR handler, void* warnhandler_user_data)
+{
+    opts->warnhandler = handler;
+    opts->warnhandler_user_data = warnhandler_user_data;
+}
+
+static void _TIFFEmitErrorAboveMaxSingleMemAlloc(TIFF* tif, const char* pszFunction, tmsize_t s)
+{
+    TIFFErrorExtR(tif, pszFunction,
+                  "Memory allocation of %" PRIu64 " bytes is beyond the %" PRIu64 " byte limit defined in open options",
+                  (uint64_t)s,
+                  (uint64_t)tif->tif_max_single_mem_alloc);
+}
+
+/** malloc() version that takes into account memory-specific open options */
+void* _TIFFmallocExt(TIFF* tif, tmsize_t s)
+{
+    if (tif != NULL && tif->tif_max_single_mem_alloc > 0 && s > tif->tif_max_single_mem_alloc)
+    {
+        _TIFFEmitErrorAboveMaxSingleMemAlloc(tif, "_TIFFmallocExt", s);
+        return NULL;
+    }
+    return _TIFFmalloc(s);
+}
+
+/** calloc() version that takes into account memory-specific open options */
+void* _TIFFcallocExt(TIFF* tif, tmsize_t nmemb, tmsize_t siz)
+{
+    if (tif != NULL && tif->tif_max_single_mem_alloc > 0)
+    {
+        if (nmemb <= 0 || siz <= 0 || nmemb > TIFF_TMSIZE_T_MAX / siz)
+            return NULL;
+        if (nmemb * siz > tif->tif_max_single_mem_alloc)
+        {
+            _TIFFEmitErrorAboveMaxSingleMemAlloc(tif, "_TIFFcallocExt", nmemb * siz);
+            return NULL;
+        }
+    }
+    return _TIFFcalloc(nmemb, siz);
+}
+
+/** realloc() version that takes into account memory-specific open options */
+void* _TIFFreallocExt(TIFF* tif, void* p, tmsize_t s)
+{
+    if (tif != NULL && tif->tif_max_single_mem_alloc > 0 && s > tif->tif_max_single_mem_alloc)
+    {
+        _TIFFEmitErrorAboveMaxSingleMemAlloc(tif, "_TIFFreallocExt", s);
+        return NULL;
+    }
+    return _TIFFrealloc(p, s);
+}
+
+/** free() version that takes into account memory-specific open options */
+void _TIFFfreeExt(TIFF* tif, void* p)
+{
+    (void)tif;
+    _TIFFfree(p);
+}
+
 
 TIFF*
 TIFFClientOpen(
@@ -78,9 +164,32 @@ TIFFClientOpen(
 	TIFFSizeProc sizeproc,
 	TIFFMapFileProc mapproc,
 	TIFFUnmapFileProc unmapproc
-)
+) {
+  return TIFFClientOpenExt(name, mode, clientdata,
+                           readproc,
+                           writeproc,
+                           seekproc,
+                           closeproc,
+                           sizeproc,
+                           mapproc,
+                           unmapproc,
+                           NULL);
+}
+
+TIFF*
+TIFFClientOpenExt(
+	const char* name, const char* mode,
+	thandle_t clientdata,
+	TIFFReadWriteProc readproc,
+	TIFFReadWriteProc writeproc,
+	TIFFSeekProc seekproc,
+	TIFFCloseProc closeproc,
+	TIFFSizeProc sizeproc,
+	TIFFMapFileProc mapproc,
+	TIFFUnmapFileProc unmapproc,
+    TIFFOpenOptions* opts)
 {
-	static const char module[] = "TIFFClientOpen";
+	static const char module[] = "TIFFClientOpenExt";
 	TIFF *tif;
 	int m;
 	const char* cp;
@@ -111,12 +220,20 @@ TIFFClientOpen(
 		#endif
 	}
 
-	m = _TIFFgetMode(mode, module);
+	m = _TIFFgetMode(opts, clientdata, mode, module);
 	if (m == -1)
 		goto bad2;
-	tif = (TIFF *)_TIFFmalloc((tmsize_t)(sizeof (TIFF) + strlen(name) + 1));
+	tmsize_t size_to_alloc = (tmsize_t)(sizeof (TIFF) + strlen(name) + 1);
+	if (opts && opts->max_single_mem_alloc > 0 &&
+	    size_to_alloc > opts->max_single_mem_alloc) {
+		_TIFFErrorEarly(opts, clientdata, module,
+		                "%s: Memory allocation of %" PRIu64 " bytes is beyond the %" PRIu64 " byte limit defined in open options",
+		                name, (uint64_t)size_to_alloc, (uint64_t)opts->max_single_mem_alloc);
+		goto bad2;
+	}
+	tif = (TIFF *)_TIFFmallocExt(NULL, size_to_alloc);
 	if (tif == NULL) {
-		TIFFErrorExt(clientdata, module, "%s: Out of memory (TIFF structure)", name);
+		_TIFFErrorEarly(opts, clientdata, module, "%s: Out of memory (TIFF structure)", name);
 		goto bad2;
 	}
 	_TIFFmemset(tif, 0, sizeof (*tif));
@@ -128,25 +245,29 @@ TIFFClientOpen(
 	tif->tif_curstrip = (uint32_t) -1;	/* invalid strip */
 	tif->tif_row = (uint32_t) -1;		/* read/write pre-increment */
 	tif->tif_clientdata = clientdata;
-	if (!readproc || !writeproc || !seekproc || !closeproc || !sizeproc) {
-		TIFFErrorExt(clientdata, module,
-		    "One of the client procedures is NULL pointer.");
-		_TIFFfree(tif);
-		goto bad2;
-	}
 	tif->tif_readproc = readproc;
 	tif->tif_writeproc = writeproc;
 	tif->tif_seekproc = seekproc;
 	tif->tif_closeproc = closeproc;
 	tif->tif_sizeproc = sizeproc;
-	if (mapproc)
-		tif->tif_mapproc = mapproc;
-	else
-		tif->tif_mapproc = _tiffDummyMapProc;
-	if (unmapproc)
-		tif->tif_unmapproc = unmapproc;
-	else
-		tif->tif_unmapproc = _tiffDummyUnmapProc;
+	tif->tif_mapproc = mapproc ? mapproc : _tiffDummyMapProc;
+	tif->tif_unmapproc = unmapproc ? unmapproc : _tiffDummyUnmapProc;
+    if( opts )
+    {
+        tif->tif_errorhandler = opts->errorhandler;
+        tif->tif_errorhandler_user_data = opts->errorhandler_user_data;
+        tif->tif_warnhandler = opts->warnhandler;
+        tif->tif_warnhandler_user_data = opts->warnhandler_user_data;
+        tif->tif_max_single_mem_alloc = opts->max_single_mem_alloc;
+    }
+
+	if (!readproc || !writeproc || !seekproc || !closeproc || !sizeproc) {
+		TIFFErrorExtR(tif, module,
+		    "One of the client procedures is NULL pointer.");
+		_TIFFfreeExt(NULL, tif);
+		goto bad2;
+	}
+
 	_TIFFSetDefaultCompressionState(tif);    /* setup default state */
 	/*
 	 * Default is to return data MSB2LSB and enable the
@@ -287,7 +408,7 @@ TIFFClientOpen(
 	if ((m & O_TRUNC) ||
 	    !ReadOK(tif, &tif->tif_header, sizeof (TIFFHeaderClassic))) {
 		if (tif->tif_mode == O_RDONLY) {
-			TIFFErrorExt(tif->tif_clientdata, name,
+			TIFFErrorExtR(tif, name,
 			    "Cannot read TIFF header");
 			goto bad;
 		}
@@ -331,7 +452,7 @@ TIFFClientOpen(
 		 */
 		TIFFSeekFile( tif, 0, SEEK_SET );
 		if (!WriteOK(tif, &tif->tif_header, (tmsize_t)(tif->tif_header_size))) {
-			TIFFErrorExt(tif->tif_clientdata, name,
+			TIFFErrorExtR(tif, name,
 			    "Error writing TIFF header");
 			goto bad;
 		}
@@ -354,7 +475,8 @@ TIFFClientOpen(
 			goto bad;
 		tif->tif_diroff = 0;
 		tif->tif_lastdiroff = 0;
-		tif->tif_dirlist = NULL;
+		tif->tif_dirlistoff = NULL;
+		tif->tif_dirlistdirn = NULL;
 		tif->tif_dirlistsize = 0;
 		tif->tif_dirnumber = 0;
 		return (tif);
@@ -372,11 +494,11 @@ TIFFClientOpen(
 	    tif->tif_header.common.tiff_magic != MDI_LITTLEENDIAN
 	    #endif
 	    ) {
-		TIFFErrorExt(tif->tif_clientdata, name,
+		TIFFErrorExtR(tif, name,
 		    "Not a TIFF or MDI file, bad magic number %"PRIu16" (0x%"PRIx16")",
 	    #else
 	    ) {
-		TIFFErrorExt(tif->tif_clientdata, name,
+		TIFFErrorExtR(tif, name,
 		    "Not a TIFF file, bad magic number %"PRIu16" (0x%"PRIx16")",
 	    #endif
 		    tif->tif_header.common.tiff_magic,
@@ -396,7 +518,7 @@ TIFFClientOpen(
 		TIFFSwabShort(&tif->tif_header.common.tiff_version);
 	if ((tif->tif_header.common.tiff_version != TIFF_VERSION_CLASSIC)&&
 	    (tif->tif_header.common.tiff_version != TIFF_VERSION_BIG)) {
-		TIFFErrorExt(tif->tif_clientdata, name,
+		TIFFErrorExtR(tif, name,
 		    "Not a TIFF file, bad version number %"PRIu16" (0x%"PRIx16")",
 		    tif->tif_header.common.tiff_version,
 		    tif->tif_header.common.tiff_version);
@@ -412,7 +534,7 @@ TIFFClientOpen(
 	{
 		if (!ReadOK(tif, ((uint8_t*)(&tif->tif_header) + sizeof(TIFFHeaderClassic)), (sizeof(TIFFHeaderBig) - sizeof(TIFFHeaderClassic))))
 		{
-			TIFFErrorExt(tif->tif_clientdata, name,
+			TIFFErrorExtR(tif, name,
 			    "Cannot read TIFF header");
 			goto bad;
 		}
@@ -423,7 +545,7 @@ TIFFClientOpen(
 		}
 		if (tif->tif_header.big.tiff_offsetsize != 8)
 		{
-			TIFFErrorExt(tif->tif_clientdata, name,
+			TIFFErrorExtR(tif, name,
 			    "Not a TIFF file, bad BigTIFF offsetsize %"PRIu16" (0x%"PRIx16")",
 			    tif->tif_header.big.tiff_offsetsize,
 			    tif->tif_header.big.tiff_offsetsize);
@@ -431,7 +553,7 @@ TIFFClientOpen(
 		}
 		if (tif->tif_header.big.tiff_unused != 0)
 		{
-			TIFFErrorExt(tif->tif_clientdata, name,
+			TIFFErrorExtR(tif, name,
 			    "Not a TIFF file, bad BigTIFF unused %"PRIu16" (0x%"PRIx16")",
 			    tif->tif_header.big.tiff_unused,
 			    tif->tif_header.big.tiff_unused);

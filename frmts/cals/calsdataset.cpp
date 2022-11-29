@@ -32,7 +32,6 @@
 
 #include "tiff.h"
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /* ==================================================================== */
@@ -124,7 +123,11 @@ class CALSRasterBand final: public GDALPamRasterBand
     const char* GetMetadataItem( const char* pszKey,
                                  const char* pszDomain ) override
     {
-        return poUnderlyingBand->GetMetadataItem(pszKey, pszDomain);
+        if( !m_bEnablePixelTypeSignedByteWarning )
+            poUnderlyingBand->EnablePixelTypeSignedByteWarning(false);
+        const char* pszRet = poUnderlyingBand->GetMetadataItem(pszKey, pszDomain);
+        poUnderlyingBand->EnablePixelTypeSignedByteWarning(true);
+        return pszRet;
     }
 };
 

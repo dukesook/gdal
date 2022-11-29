@@ -473,6 +473,13 @@ CPLJSONObject::CPLJSONObject(const CPLJSONObject &other) :
 {
 }
 
+CPLJSONObject::CPLJSONObject(CPLJSONObject &&other) :
+    m_poJsonObject(other.m_poJsonObject),
+    m_osKey(std::move(other.m_osKey))
+{
+    other.m_poJsonObject = nullptr;
+}
+
 CPLJSONObject &CPLJSONObject::operator=(const CPLJSONObject &other)
 {
     if( this == &other )
@@ -1435,4 +1442,46 @@ const CPLJSONObject CPLJSONArray::operator[](int nIndex) const
     return CPLJSONObject( CPLSPrintf("id:%d", nIndex),
                           json_object_array_get_idx( TO_JSONOBJ(m_poJsonObject),
                                                      nIndex ) );
+}
+
+
+/************************************************************************/
+/*                      CPLParseKeyValueJson()                          */
+/************************************************************************/
+
+/** Return a string list of key/value pairs extracted from a JSON doc.
+
+    We are expecting simple documents with key:value pairs, like the
+    following with no hierarchy or complex structure.
+    \verbatim
+    {
+      "Code" : "Success",
+      "LastUpdated" : "2017-07-03T16:20:17Z",
+      "Type" : "AWS-HMAC",
+      "AccessKeyId" : "bla",
+      "SecretAccessKey" : "bla",
+      "Token" : "bla",
+      "Expiration" : "2017-07-03T22:42:58Z"
+    }
+    \endverbatim
+    @since GDAL 3.7
+ */
+CPLStringList CPLParseKeyValueJson(const char *pszJson)
+{
+    CPLJSONDocument oDoc;
+    CPLStringList oNameValue;
+    if( pszJson != nullptr && oDoc.LoadMemory(pszJson) )
+    {
+        for( const auto& obj: oDoc.GetRoot().GetChildren() )
+        {
+            const auto eType = obj.GetType();
+            if( eType == CPLJSONObject::Type::String ||
+                eType == CPLJSONObject::Type::Integer ||
+                eType == CPLJSONObject::Type::Double )
+            {
+                oNameValue.SetNameValue( obj.GetName().c_str(), obj.ToString().c_str() );
+            }
+        }
+    }
+    return oNameValue;
 }

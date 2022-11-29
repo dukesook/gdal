@@ -60,7 +60,6 @@
 #include "ogr_spatialref.h"
 #include "vrtdataset.h"
 
-CPL_CVSID("$Id$")
 
 #define GEOTRSFRM_TOPLEFT_X            0
 #define GEOTRSFRM_WE_RES               1
@@ -95,6 +94,7 @@ struct DatasetProperty
     std::vector<bool>   abHasMaskBand{};
     std::vector<double> adfScale{};
     int    bHasDatasetMask = 0;
+    bool   bLastBandIsAlpha = false;
     int    nMaskBlockXSize = 0;
     int    nMaskBlockYSize = 0;
     std::vector<int> anOverviewFactors{};
@@ -226,6 +226,7 @@ class VRTBuilder
     int                 nSrcDSCount = 0;
     GDALDatasetH       *pahSrcDS = nullptr;
     int                 nTotalBands = 0;
+    bool                bLastBandIsAlpha = false;
     bool                bExplicitBandList = false;
     int                 nMaxSelectedBandNo = 0;
     int                 nSelectedBands = 0;
@@ -610,6 +611,10 @@ std::string VRTBuilder::AnalyseRaster( GDALDatasetH hDS, DatasetProperty* psData
                         &psDatasetProperties->nMaskBlockXSize,
                         &psDatasetProperties->nMaskBlockYSize);
 
+    psDatasetProperties->bLastBandIsAlpha = false;
+    if( poDS->GetRasterBand(_nBands)->GetColorInterpretation() == GCI_AlphaBand )
+        psDatasetProperties->bLastBandIsAlpha = true;
+
     // Collect overview factors. We only handle power-of-two situations for now
     const int nOverviews = poFirstBand->GetOverviewCount();
     int nExpectedOvFactor = 2;
@@ -674,6 +679,13 @@ std::string VRTBuilder::AnalyseRaster( GDALDatasetH hDS, DatasetProperty* psData
 
     if (bFirst)
     {
+        nTotalBands = _nBands;
+        if( bAddAlpha && psDatasetProperties->bLastBandIsAlpha )
+        {
+            bLastBandIsAlpha = true;
+            nTotalBands --;
+        }
+
         if (proj)
             pszProjectionRef = CPLStrdup(proj);
         if (!bUserExtent)
@@ -685,10 +697,9 @@ std::string VRTBuilder::AnalyseRaster( GDALDatasetH hDS, DatasetProperty* psData
         }
 
         //if not provided an explicit band list, take the one of the first dataset
-        nTotalBands = _nBands;
         if(nSelectedBands == 0)
         {
-            nSelectedBands = _nBands;
+            nSelectedBands = nTotalBands;
             CPLFree(panSelectedBandList);
             panSelectedBandList = static_cast<int *>(CPLMalloc(nSelectedBands * sizeof(int)));
             for(int j=0;j<nSelectedBands;j++)
@@ -708,7 +719,7 @@ std::string VRTBuilder::AnalyseRaster( GDALDatasetH hDS, DatasetProperty* psData
             for(int j=0;j<nSelectedBands;j++)
             {
                 const int nSelBand = panSelectedBandList[j];
-                if( nSelBand <= 0 || nSelBand > _nBands )
+                if( nSelBand <= 0 || nSelBand > nTotalBands )
                 {
                     return CPLSPrintf("Invalid band number: %d", nSelBand);
                 }
@@ -776,9 +787,17 @@ std::string VRTBuilder::AnalyseRaster( GDALDatasetH hDS, DatasetProperty* psData
         {
             if (!bExplicitBandList && _nBands != nTotalBands)
             {
-                return CPLSPrintf("gdalbuildvrt does not support heterogeneous band "
-                                 "numbers: expected %d, got %d.",
-                                 nTotalBands, _nBands);
+                if( bAddAlpha && _nBands == nTotalBands + 1 &&
+                    psDatasetProperties->bLastBandIsAlpha )
+                {
+                    bLastBandIsAlpha = true;
+                }
+                else
+                {
+                    return CPLSPrintf("gdalbuildvrt does not support heterogeneous band "
+                                     "numbers: expected %d, got %d.",
+                                     nTotalBands, _nBands);
+                }
             }
             else if( bExplicitBandList && _nBands < nMaxSelectedBandNo )
             {
@@ -1011,17 +1030,18 @@ void VRTBuilder::CreateVRTSeparate(VRTDatasetH hVRTDS)
         VRTSimpleSource* poSimpleSource;
         if (bAllowSrcNoData)
         {
-            poSimpleSource = new VRTComplexSource();
+            auto poComplexSource = new VRTComplexSource();
+            poSimpleSource = poComplexSource;
             if (nSrcNoDataCount > 0)
             {
                 if (iBand-1 < nSrcNoDataCount)
-                    poSimpleSource->SetNoDataValue( padfSrcNoData[iBand-1] );
+                    poComplexSource->SetNoDataValue( padfSrcNoData[iBand-1] );
                 else
-                    poSimpleSource->SetNoDataValue( padfSrcNoData[nSrcNoDataCount - 1] );
+                    poComplexSource->SetNoDataValue( padfSrcNoData[nSrcNoDataCount - 1] );
             }
             else if( psDatasetProperties->abHasNoData[0] )
             {
-                poSimpleSource->SetNoDataValue( psDatasetProperties->adfNoDataValues[0] );
+                poComplexSource->SetNoDataValue( psDatasetProperties->adfNoDataValues[0] );
             }
         }
         else if( bUseSrcMaskBand && psDatasetProperties->abHasMaskBand[0] )
@@ -1173,7 +1193,7 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDatasetH hVRTDS)
             reinterpret_cast<GDALProxyPoolDataset*>(hProxyDS)->
                                             SetOpenOptions( papszOpenOptions );
 
-            for(int j=0;j<nMaxSelectedBandNo;j++)
+            for(int j=0;j<nMaxSelectedBandNo + (bAddAlpha && psDatasetProperties->bLastBandIsAlpha ? 1 : 0);j++)
             {
                 GDALProxyPoolDatasetAddSrcBandDescription(hProxyDS,
                                                 asBandProperties[j].dataType,
@@ -1191,11 +1211,12 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDatasetH hVRTDS)
             hSourceDS = static_cast<GDALDatasetH>(hProxyDS);
         }
 
-        for(int j=0;j<nSelectedBands;j++)
+        for(int j=0;j<nSelectedBands + (bAddAlpha && psDatasetProperties->bLastBandIsAlpha ? 1 : 0);j++)
         {
             VRTSourcedRasterBandH hVRTBand =
                     static_cast<VRTSourcedRasterBandH>(poVRTDS->GetRasterBand(j + 1));
-            const int nSelBand = panSelectedBandList[j];
+            const int nSelBand = j == nSelectedBands ?
+                nSelectedBands + 1 : panSelectedBandList[j];
 
             /* Place the raster band at the right position in the VRT */
             VRTSourcedRasterBand* poVRTBand = static_cast<VRTSourcedRasterBand*>(hVRTBand);
@@ -1203,8 +1224,9 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDatasetH hVRTDS)
             VRTSimpleSource* poSimpleSource;
             if (bAllowSrcNoData && psDatasetProperties->abHasNoData[nSelBand - 1])
             {
-                poSimpleSource = new VRTComplexSource();
-                poSimpleSource->SetNoDataValue( psDatasetProperties->adfNoDataValues[nSelBand - 1] );
+                auto poComplexSource = new VRTComplexSource();
+                poSimpleSource = poComplexSource;
+                poComplexSource->SetNoDataValue( psDatasetProperties->adfNoDataValues[nSelBand - 1] );
             }
             else if( bUseSrcMaskBand && psDatasetProperties->abHasMaskBand[nSelBand - 1] )
             {
@@ -1229,7 +1251,7 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDatasetH hVRTDS)
             poVRTBand->AddSource( poSimpleSource );
         }
 
-        if (bAddAlpha)
+        if (bAddAlpha && !psDatasetProperties->bLastBandIsAlpha )
         {
             VRTSourcedRasterBandH hVRTBand =
                     static_cast<VRTSourcedRasterBandH>(GDALGetRasterBand(hVRTDS, nSelectedBands + 1));
@@ -1307,11 +1329,12 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDatasetH hVRTDS)
         anOverviewFactors.insert(anOverviewFactors.end(),
                                  anOverviewFactorsSet.begin(),
                                  anOverviewFactorsSet.end());
-        CPLConfigOptionSetter oSetter("VRT_VIRTUAL_OVERVIEWS", "YES", false);
+        const char* const apszOptions [] = { "VRT_VIRTUAL_OVERVIEWS=YES", nullptr };
         poVRTDS->BuildOverviews(pszResampling ? pszResampling : "nearest",
                                 static_cast<int>(anOverviewFactors.size()),
                                 &anOverviewFactors[0],
-                                0, nullptr, nullptr, nullptr);
+                                0, nullptr, nullptr, nullptr,
+                                apszOptions );
     }
 }
 

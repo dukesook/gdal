@@ -36,7 +36,6 @@
 #include "ogrlibkmlstyle.h"
 #include "ogr_libkml.h"
 
-CPL_CVSID("$Id$")
 
 using kmlbase::Color32;
 using kmldom::BalloonStylePtr;
@@ -255,11 +254,13 @@ StylePtr addstylestring2kml(
                         poKmlIconStyle = poKmlFactory->CreateIconStyle();
 
                     HotSpotPtr poKmlHotSpot = poKmlFactory->CreateHotSpot();
+                    if( poKmlHotSpot )
+                    {
+                        poKmlHotSpot->set_x( dfDx );
+                        poKmlHotSpot->set_y( dfDy );
 
-                    poKmlHotSpot->set_x( dfDx );
-                    poKmlHotSpot->set_y( dfDy );
-
-                    poKmlIconStyle->set_hotspot( poKmlHotSpot );
+                        poKmlIconStyle->set_hotspot( poKmlHotSpot );
+                    }
                 }
 
                 break;
@@ -333,11 +334,13 @@ StylePtr addstylestring2kml(
                     }
 
                     HotSpotPtr poKmlHotSpot = poKmlFactory->CreateHotSpot();
+                    if( poKmlHotSpot )
+                    {
+                        poKmlHotSpot->set_x( dfDx );
+                        poKmlHotSpot->set_y( dfDy );
 
-                    poKmlHotSpot->set_x( dfDx );
-                    poKmlHotSpot->set_y( dfDy );
-
-                    poKmlIconStyle->set_hotspot( poKmlHotSpot );
+                        poKmlIconStyle->set_hotspot( poKmlHotSpot );
+                    }
                 }
 
                 /***** label text *****/
@@ -779,7 +782,7 @@ static ContainerPtr MyGetContainerFromRoot(
         {
             KmlPtr poKmlKml = AsKml( poKmlRoot );
 
-            if( poKmlKml->has_feature() )
+            if( poKmlKml && poKmlKml->has_feature() )
             {
                 FeaturePtr poKmlFeat = poKmlKml->get_feature();
 

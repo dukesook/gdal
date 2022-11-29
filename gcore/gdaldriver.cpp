@@ -47,7 +47,6 @@
 #include "ogr_core.h"
 #include "ogrsf_frmts.h"
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                             GDALDriver()                             */
@@ -631,9 +630,12 @@ GDALDataset *GDALDriver::DefaultCreateCopy( const char * pszFilename,
          iOptItem += 2 )
     {
         // does the source have this metadata item on the first band?
+        auto poBand = poSrcDS->GetRasterBand(1);
+        poBand->EnablePixelTypeSignedByteWarning(false);
         const char *pszValue =
-            poSrcDS->GetRasterBand(1)->GetMetadataItem(
+            poBand->GetMetadataItem(
                 apszOptItems[iOptItem], apszOptItems[iOptItem+1] );
+        poBand->EnablePixelTypeSignedByteWarning(true);
 
         if( pszValue == nullptr )
             continue;

@@ -36,7 +36,7 @@ PackBitsPreEncode(TIFF* tif, uint16_t s)
 {
 	(void) s;
 
-        tif->tif_data = (uint8_t*)_TIFFmalloc(sizeof(tmsize_t));
+        tif->tif_data = (uint8_t*)_TIFFmallocExt(tif, sizeof(tmsize_t));
 	if (tif->tif_data == NULL)
 		return (0);
 	/*
@@ -53,7 +53,7 @@ static int
 PackBitsPostEncode(TIFF* tif)
 {
         if (tif->tif_data)
-            _TIFFfree(tif->tif_data);
+            _TIFFfreeExt(tif, tif->tif_data);
 	return (1);
 }
 
@@ -231,14 +231,14 @@ PackBitsDecode(TIFF* tif, uint8_t* op, tmsize_t occ, uint16_t s)
 			n = -n + 1;
 			if( occ < (tmsize_t)n )
 			{
-				TIFFWarningExt(tif->tif_clientdata, module,
+				TIFFWarningExtR(tif, module,
 				    "Discarding %"TIFF_SSIZE_FORMAT" bytes to avoid buffer overrun",
 				    (tmsize_t)n - occ);
 				n = (long)occ;
 			}
 			if( cc == 0 )
 			{
-				TIFFWarningExt(tif->tif_clientdata, module,
+				TIFFWarningExtR(tif, module,
 					       "Terminating PackBitsDecode due to lack of data.");
 				break;
 			}
@@ -250,14 +250,14 @@ PackBitsDecode(TIFF* tif, uint8_t* op, tmsize_t occ, uint16_t s)
 		} else {		/* copy next n+1 bytes literally */
 			if (occ < (tmsize_t)(n + 1))
 			{
-				TIFFWarningExt(tif->tif_clientdata, module,
+				TIFFWarningExtR(tif, module,
 				    "Discarding %"TIFF_SSIZE_FORMAT" bytes to avoid buffer overrun",
 				    (tmsize_t)n - occ + 1);
 				n = (long)occ - 1;
 			}
 			if (cc < (tmsize_t) (n+1)) 
 			{
-				TIFFWarningExt(tif->tif_clientdata, module,
+				TIFFWarningExtR(tif, module,
 					       "Terminating PackBitsDecode due to lack of data.");
 				break;
 			}
@@ -269,7 +269,7 @@ PackBitsDecode(TIFF* tif, uint8_t* op, tmsize_t occ, uint16_t s)
 	tif->tif_rawcp = (uint8_t*) bp;
 	tif->tif_rawcc = cc;
 	if (occ > 0) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "Not enough data for scanline %"PRIu32,
 		    tif->tif_row);
 		return (0);

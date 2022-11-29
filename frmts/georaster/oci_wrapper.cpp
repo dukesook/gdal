@@ -29,7 +29,6 @@
 
 #include "oci_wrapper.h"
 
-CPL_CVSID("$Id$")
 
 static const OW_CellDepth ahOW_CellDepth[] = {
     {"8BIT_U",          GDT_Byte},
@@ -1537,6 +1536,22 @@ unsigned long OWStatement::WriteBlob( OCILobLocator* phLocator,
     }
 
     return static_cast<unsigned long>(nAmont);
+}
+
+
+bool OWStatement::TrimLob( OCILobLocator* phLocator,
+                           unsigned long newLen )
+{
+    if( CheckError( OCILobTrim2(
+        poConnection->hSvcCtx,
+        hError,
+        phLocator,
+        (ub8) newLen), hError ) )
+    {
+        return 0;
+    }
+
+    return 1; 
 }
 
 char* OWStatement::ReadCLob( OCILobLocator* phLocator )

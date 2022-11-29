@@ -63,6 +63,7 @@ CPL_C_START
 typedef enum {
     /*! Unknown or unspecified type */          GDT_Unknown = 0,
     /*! Eight bit unsigned integer */           GDT_Byte = 1,
+    /*! 8-bit signed integer (GDAL >= 3.7) */   GDT_Int8 = 14,
     /*! Sixteen bit unsigned integer */         GDT_UInt16 = 2,
     /*! Sixteen bit signed integer */           GDT_Int16 = 3,
     /*! Thirty two bit unsigned integer */      GDT_UInt32 = 4,
@@ -76,7 +77,7 @@ typedef enum {
     /* TODO?(#6879): GDT_CInt64 */
     /*! Complex Float32 */                      GDT_CFloat32 = 10,
     /*! Complex Float64 */                      GDT_CFloat64 = 11,
-    GDT_TypeCount = 14          /* maximum type # + 1 */
+    GDT_TypeCount = 15          /* maximum type # + 1 */
 } GDALDataType;
 
 int CPL_DLL CPL_STDCALL GDALGetDataTypeSize( GDALDataType );  // Deprecated.
@@ -376,6 +377,11 @@ typedef struct GDALDimensionHS* GDALDimensionH;
  */
 #define GDAL_DMD_MULTIDIM_ARRAY_CREATIONOPTIONLIST "DMD_MULTIDIM_ARRAY_CREATIONOPTIONLIST"
 
+/** XML snippet with multidimensional array open options.
+ * @since GDAL 3.6
+ */
+#define GDAL_DMD_MULTIDIM_ARRAY_OPENOPTIONLIST "DMD_MULTIDIM_ARRAY_OPENOPTIONLIST"
+
 /** XML snippet with multidimensional attribute creation options.
  * @since GDAL 3.1
  */
@@ -512,6 +518,13 @@ typedef struct GDALDimensionHS* GDALDimensionH;
  */
 #define GDAL_DMD_ALTER_FIELD_DEFN_FLAGS "GDAL_DMD_ALTER_FIELD_DEFN_FLAGS"
 
+/** List of (space separated) field names which are considered illegal by the driver and
+ * should not be used when creating/altering fields.
+ *
+ * @since GDAL 3.7
+ */
+#define GDAL_DMD_ILLEGAL_FIELD_NAMES "GDAL_DMD_ILLEGAL_FIELD_NAMES"
+
 /** Capability set by a driver that can create fields with NOT NULL constraint.
  * @since GDAL 2.0
  */
@@ -600,6 +613,48 @@ typedef struct GDALDimensionHS* GDALDimensionH;
  */
 #define GDAL_DCAP_RELATIONSHIPS "DCAP_RELATIONSHIPS"
 
+/** Capability set by drivers for formats which support creating table relationships.
+ * @since GDAL 3.6
+ */
+#define GDAL_DCAP_CREATE_RELATIONSHIP "DCAP_CREATE_RELATIONSHIP"
+
+/** Capability set by drivers for formats which support deleting table relationships.
+ * @since GDAL 3.6
+ */
+#define GDAL_DCAP_DELETE_RELATIONSHIP "DCAP_DELETE_RELATIONSHIP"
+
+/** Capability set by drivers for formats which support updating existing table relationships.
+ * @since GDAL 3.6
+ */
+#define GDAL_DCAP_UPDATE_RELATIONSHIP "DCAP_UPDATE_RELATIONSHIP"
+
+/** List of (space separated) flags indicating the features of relationships are supported by the driver.
+ *
+ * Supported values are:
+ *
+ * - "OneToOne": supports one-to-one relationships, see GDALRelationshipCardinality::GRC_ONE_TO_ONE
+ * - "OneToMany": supports one-to-many relationships, see GDALRelationshipCardinality::GRC_ONE_TO_MANY
+ * - "ManyToOne": supports many-to-one relationships, see GDALRelationshipCardinality::GRC_MANY_TO_ONE
+ * - "ManyToMany": supports many-to-many relationships, see GDALRelationshipCardinality::GRC_MANY_TO_MANY
+ * - "Composite": supports composite relationship types, see GDALRelationshipType::GRT_COMPOSITE
+ * - "Association": supports association relationship types, see GDALRelationshipType::GRT_ASSOCIATION
+ * - "Aggregation": supports aggregation relationship types, see GDALRelationshipType::GRT_AGGREGATION
+ * - "MultipleFieldKeys": multiple fields can be used for relationship keys. If not present then only a single field name can be used.
+ * - "ForwardPathLabel": supports forward path labels
+ * - "BackwardPathLabel": supports backward path labels
+ *
+ * @since GDAL 3.6
+ */
+#define GDAL_DMD_RELATIONSHIP_FLAGS "GDAL_DMD_RELATIONSHIP_FLAGS"
+
+/** List of (space separated) standard related table types which are recognised by the driver.
+ *
+ * See GDALRelationshipGetRelatedTableType/GDALRelationshipSetRelatedTableType
+ *
+ * @since GDAL 3.7
+ */
+#define GDAL_DMD_RELATIONSHIP_RELATED_TABLE_TYPES "GDAL_DMD_RELATIONSHIP_RELATED_TABLE_TYPES"
+
 /** Capability set by drivers for formats which support renaming vector layers.
  *
  * @since GDAL 3.5
@@ -631,6 +686,26 @@ typedef struct GDALDimensionHS* GDALDimensionH;
  */
 #define GDAL_DMD_ALTER_GEOM_FIELD_DEFN_FLAGS "DMD_ALTER_GEOM_FIELD_DEFN_FLAGS"
 
+/** List of (space separated) SQL dialects supported by the driver.
+ *
+ * The default SQL dialect for the driver will always be the first listed value.
+ *
+ * Standard values are:
+ *
+ * - "OGRSQL": the OGR SQL dialect, see https://gdal.org/user/ogr_sql_dialect.html
+ * - "SQLITE": the SQLite dialect, see https://gdal.org/user/sql_sqlite_dialect.html
+ * - "NATIVE": for drivers with an RDBMS backend this value indicates that the SQL
+ *   will be passed directly to that database backend, and therefore the RDBMS' native
+ *   dialect will be used
+ *
+ * Other dialect values may also be present for some drivers (for some of them,
+ * the query string to use might not even by SQL but a dedicated query
+ * language). For further details on their interpretation, see the documentation
+ * for the respective driver.
+ *
+ * @since GDAL 3.6
+ */
+#define GDAL_DMD_SUPPORTED_SQL_DIALECTS "DMD_SUPPORTED_SQL_DIALECTS"
 
 /** Value for GDALDimension::GetType() specifying the X axis of a horizontal CRS.
  * @since GDAL 3.1
@@ -657,6 +732,9 @@ typedef struct GDALDimensionHS* GDALDimensionH;
  */
 #define GDAL_DIM_TYPE_PARAMETRIC        "PARAMETRIC"
 
+#define GDsCAddRelationship    "AddRelationship"     /**< Dataset capability for supporting AddRelationship() (at least partially) */
+#define GDsCDeleteRelationship "DeleteRelationship"  /**< Dataset capability for supporting DeleteRelationship()*/
+#define GDsCUpdateRelationship "UpdateRelationship"  /**< Dataset capability for supporting UpdateRelationship()*/
 
 void CPL_DLL CPL_STDCALL GDALAllRegister( void );
 
@@ -953,8 +1031,16 @@ int CPL_DLL CPL_STDCALL GDALDereferenceDataset( GDALDatasetH );
 int CPL_DLL CPL_STDCALL GDALReleaseDataset( GDALDatasetH );
 
 CPLErr CPL_DLL CPL_STDCALL
-GDALBuildOverviews( GDALDatasetH, const char *, int, int *,
-                    int, int *, GDALProgressFunc, void * ) CPL_WARN_UNUSED_RESULT;
+GDALBuildOverviews( GDALDatasetH, const char *,
+                    int, const int *,
+                    int, const int *,
+                    GDALProgressFunc, void * ) CPL_WARN_UNUSED_RESULT;
+CPLErr CPL_DLL CPL_STDCALL
+GDALBuildOverviewsEx( GDALDatasetH, const char *,
+                      int, const int *,
+                      int, const int *,
+                      GDALProgressFunc, void *,
+                      CSLConstList papszOptions ) CPL_WARN_UNUSED_RESULT;
 void CPL_DLL CPL_STDCALL GDALGetOpenDatasets( GDALDatasetH **hDS, int *pnCount );
 int CPL_DLL CPL_STDCALL GDALGetAccess( GDALDatasetH hDS );
 void CPL_DLL CPL_STDCALL GDALFlushCache( GDALDatasetH hDS );
@@ -976,6 +1062,13 @@ GDALRegenerateOverviews( GDALRasterBandH hSrcBand,
                          int nOverviewCount, GDALRasterBandH *pahOverviewBands,
                          const char *pszResampling,
                          GDALProgressFunc pfnProgress, void *pProgressData );
+
+CPLErr CPL_DLL
+GDALRegenerateOverviewsEx( GDALRasterBandH hSrcBand,
+                         int nOverviewCount, GDALRasterBandH *pahOverviewBands,
+                         const char *pszResampling,
+                         GDALProgressFunc pfnProgress, void *pProgressData,
+                         CSLConstList papszOptions );
 
 int    CPL_DLL GDALDatasetGetLayerCount( GDALDatasetH );
 OGRLayerH CPL_DLL GDALDatasetGetLayer( GDALDatasetH, int );
@@ -1023,6 +1116,16 @@ char CPL_DLL ** GDALDatasetGetRelationshipNames(GDALDatasetH, CSLConstList) CPL_
 GDALRelationshipH CPL_DLL GDALDatasetGetRelationship(GDALDatasetH hDS,
                                                      const char* pszName);
 
+bool CPL_DLL GDALDatasetAddRelationship(GDALDatasetH hDS,
+                                        GDALRelationshipH hRelationship,
+                                        char** ppszFailureReason);
+bool CPL_DLL GDALDatasetDeleteRelationship(GDALDatasetH hDS,
+                                           const char* pszName,
+                                           char** ppszFailureReason);
+bool CPL_DLL GDALDatasetUpdateRelationship(GDALDatasetH hDS,
+                                           GDALRelationshipH hRelationship,
+                                           char** ppszFailureReason);
+
 /* ==================================================================== */
 /*      GDALRasterBand ... one band/channel in a dataset.               */
 /* ==================================================================== */
@@ -1037,6 +1140,8 @@ GDALRelationshipH CPL_DLL GDALDatasetGetRelationship(GDALDatasetH hDS,
 #define SRCVAL(papoSource, eSrcType, ii) \
       (eSrcType == GDT_Byte ? \
           CPL_REINTERPRET_CAST(const GByte*,papoSource)[ii] : \
+      (eSrcType == GDT_Int8 ? \
+          CPL_REINTERPRET_CAST(const GInt8*,papoSource)[ii] : \
       (eSrcType == GDT_Float32 ? \
           CPL_REINTERPRET_CAST(const float*,papoSource)[ii] : \
       (eSrcType == GDT_Float64 ? \
@@ -1056,7 +1161,7 @@ GDALRelationshipH CPL_DLL GDALDatasetGetRelationship(GDALDatasetH hDS,
       (eSrcType == GDT_CFloat32 ? \
           CPL_REINTERPRET_CAST(const float*,papoSource)[(ii) * 2] : \
       (eSrcType == GDT_CFloat64 ? \
-          CPL_REINTERPRET_CAST(const double*,papoSource)[(ii) * 2] : 0)))))))))))
+          CPL_REINTERPRET_CAST(const double*,papoSource)[(ii) * 2] : 0))))))))))))
 
 /** Type of functions to pass to GDALAddDerivedBandPixelFunc.
  * @since GDAL 2.2 */

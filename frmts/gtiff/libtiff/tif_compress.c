@@ -35,11 +35,11 @@ TIFFNoEncode(TIFF* tif, const char* method)
 	const TIFFCodec* c = TIFFFindCODEC(tif->tif_dir.td_compression);
 
 	if (c) {
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+		TIFFErrorExtR(tif, tif->tif_name,
 			     "%s %s encoding is not implemented",
 			     c->name, method);
 	} else {
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+		TIFFErrorExtR(tif, tif->tif_name,
 			"Compression scheme %"PRIu16" %s encoding is not implemented",
 			     tif->tif_dir.td_compression, method);
 	}
@@ -73,11 +73,11 @@ TIFFNoDecode(TIFF* tif, const char* method)
 	const TIFFCodec* c = TIFFFindCODEC(tif->tif_dir.td_compression);
 
 	if (c)
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+		TIFFErrorExtR(tif, tif->tif_name,
 			     "%s %s decoding is not implemented",
 			     c->name, method);
 	else
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+		TIFFErrorExtR(tif, tif->tif_name,
 			     "Compression scheme %"PRIu16" %s decoding is not implemented",
 			     tif->tif_dir.td_compression, method);
 	return (0);
@@ -115,7 +115,7 @@ int
 _TIFFNoSeek(TIFF* tif, uint32_t off)
 {
 	(void) off;
-	TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+	TIFFErrorExtR(tif, tif->tif_name,
 		     "Compression algorithm does not support random access");
 	return (0);
 }
@@ -200,7 +200,7 @@ TIFFCodec*
 TIFFRegisterCODEC(uint16_t scheme, const char* name, TIFFInitMethod init)
 {
 	codec_t* cd = (codec_t*)
-	    _TIFFmalloc((tmsize_t)(sizeof (codec_t) + sizeof (TIFFCodec) + strlen(name)+1));
+	    _TIFFmallocExt(NULL, (tmsize_t)(sizeof (codec_t) + sizeof (TIFFCodec) + strlen(name)+1));
 
 	if (cd != NULL) {
 		cd->info = (TIFFCodec*) ((uint8_t*) cd + sizeof (codec_t));
@@ -228,7 +228,7 @@ TIFFUnRegisterCODEC(TIFFCodec* c)
 	for (pcd = &registeredCODECS; (cd = *pcd) != NULL; pcd = &cd->next)
 		if (cd->info == c) {
 			*pcd = cd->next;
-			_TIFFfree(cd);
+			_TIFFfreeExt(NULL, cd);
 			return;
 		}
 	TIFFErrorExt(0, "TIFFUnRegisterCODEC",
@@ -258,9 +258,9 @@ TIFFGetConfiguredCODECs()
 
 	for (cd = registeredCODECS; cd; cd = cd->next) {
 		new_codecs = (TIFFCodec *)
-			_TIFFrealloc(codecs, i * sizeof(TIFFCodec));
+			_TIFFreallocExt(NULL, codecs, i * sizeof(TIFFCodec));
 		if (!new_codecs) {
-			_TIFFfree (codecs);
+			_TIFFfreeExt (NULL, codecs);
 			return NULL;
 		}
 		codecs = new_codecs;
@@ -270,9 +270,9 @@ TIFFGetConfiguredCODECs()
 	for (c = _TIFFBuiltinCODECS; c->name; c++) {
 		if (TIFFIsCODECConfigured(c->scheme)) {
 			new_codecs = (TIFFCodec *)
-				_TIFFrealloc(codecs, i * sizeof(TIFFCodec));
+				_TIFFreallocExt(NULL, codecs, i * sizeof(TIFFCodec));
 			if (!new_codecs) {
-				_TIFFfree (codecs);
+				_TIFFfreeExt (NULL, codecs);
 				return NULL;
 			}
 			codecs = new_codecs;
@@ -281,9 +281,9 @@ TIFFGetConfiguredCODECs()
 		}
 	}
 
-	new_codecs = (TIFFCodec *) _TIFFrealloc(codecs, i * sizeof(TIFFCodec));
+	new_codecs = (TIFFCodec *) _TIFFreallocExt(NULL, codecs, i * sizeof(TIFFCodec));
 	if (!new_codecs) {
-		_TIFFfree (codecs);
+		_TIFFfreeExt (NULL, codecs);
 		return NULL;
 	}
 	codecs = new_codecs;

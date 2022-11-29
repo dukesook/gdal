@@ -51,6 +51,7 @@
 #include "ogr_p.h"
 #include "ogr_spatialref.h"
 #include "ogr_srs_api.h"
+#include "ogr_wkb.h"
 
 #ifndef HAVE_GEOS
 #define UNUSED_IF_NO_GEOS CPL_UNUSED
@@ -58,7 +59,6 @@
 #define UNUSED_IF_NO_GEOS
 #endif
 
-CPL_CVSID("$Id$")
 
 //! @cond Doxygen_Suppress
 int OGRGeometry::bGenerate_DB2_V72_BYTE_ORDER = FALSE;
@@ -2829,13 +2829,6 @@ OGRMergeGeometryTypesEx( OGRwkbGeometryType eMain,
             return OGR_GT_SetModifier(eFMain, bHasZ, bHasM);
     }
 
-    // Both are geometry collections.
-    if( OGR_GT_IsSubClassOf(eFMain, wkbGeometryCollection) &&
-        OGR_GT_IsSubClassOf(eFExtra, wkbGeometryCollection) )
-    {
-        return OGR_GT_SetModifier(wkbGeometryCollection, bHasZ, bHasM);
-    }
-
     // One is subclass of the other one
     if( OGR_GT_IsSubClassOf(eFMain, eFExtra) )
     {
@@ -4028,7 +4021,7 @@ OGRGeometryH OGR_G_ConvexHull( OGRGeometryH hTarget )
  * hull. Frequently used to convert a multi-point into a polygonal area.
  * that contains all the points in the input Geometry.
  *
- * A new geometry object is created and returned containing the convex
+ * A new geometry object is created and returned containing the concave
  * hull of the geometry on which the method is invoked.
  *
  * This method is the same as the C function OGR_G_ConcaveHull().
@@ -6321,57 +6314,21 @@ int OGRPreparedGeometryContains(
 /*                       OGRGeometryFromEWKB()                          */
 /************************************************************************/
 
-/* Flags for creating WKB format for PostGIS */
-// #define WKBZOFFSET 0x80000000
-// #define WKBMOFFSET 0x40000000
-#define WKBSRIDFLAG 0x20000000
-// #define WKBBBOXFLAG 0x10000000
-
-OGRGeometry *OGRGeometryFromEWKB( GByte *pabyWKB, int nLength, int* pnSRID,
+OGRGeometry *OGRGeometryFromEWKB( GByte *pabyEWKB, int nLength, int* pnSRID,
                                   int bIsPostGIS1_EWKB )
 
 {
     OGRGeometry *poGeometry = nullptr;
 
-    if( nLength < 5 )
-    {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "Invalid EWKB content : %d bytes", nLength );
+    size_t nWKBSize = 0;
+    const GByte* pabyWKB = WKBFromEWKB( pabyEWKB, nLength, nWKBSize, pnSRID );
+    if( pabyWKB == nullptr )
         return nullptr;
-    }
-
-/* -------------------------------------------------------------------- */
-/*      Detect byte order                                               */
-/* -------------------------------------------------------------------- */
-    OGRwkbByteOrder eByteOrder = (pabyWKB[0] == 0 ? wkbXDR : wkbNDR);
-
-/* -------------------------------------------------------------------- */
-/*      PostGIS EWKB format includes an SRID, but this won't be         */
-/*      understood by OGR, so if the SRID flag is set, we remove the    */
-/*      SRID (bytes at offset 5 to 8).                                  */
-/* -------------------------------------------------------------------- */
-    if( nLength > 9 &&
-        ((pabyWKB[0] == 0 /* big endian */ && (pabyWKB[1] & 0x20) )
-        || (pabyWKB[0] != 0 /* little endian */ && (pabyWKB[4] & 0x20))) )
-    {
-        if( pnSRID )
-        {
-            memcpy(pnSRID, pabyWKB+5, 4);
-            if( OGR_SWAP( eByteOrder ) )
-                *pnSRID = CPL_SWAP32(*pnSRID);
-        }
-        memmove( pabyWKB+5, pabyWKB+9, nLength-9 );
-        nLength -= 4;
-        if( pabyWKB[0] == 0 )
-            pabyWKB[1] &= (~0x20);
-        else
-            pabyWKB[4] &= (~0x20);
-    }
 
 /* -------------------------------------------------------------------- */
 /*      Try to ingest the geometry.                                     */
 /* -------------------------------------------------------------------- */
-    (void) OGRGeometryFactory::createFromWkb( pabyWKB, nullptr, &poGeometry, nLength,
+    (void) OGRGeometryFactory::createFromWkb( pabyWKB, nullptr, &poGeometry, nWKBSize,
                                               (bIsPostGIS1_EWKB) ? wkbVariantPostGIS1 : wkbVariantOldOgc );
 
     return poGeometry;
@@ -6462,6 +6419,7 @@ char* OGRGeometryToHexEWKB( OGRGeometry * poGeometry, int nSRSId,
     if( nSRSId > 0 )
     {
         // Change the flag to wkbNDR (little) endianness.
+        constexpr GUInt32 WKBSRIDFLAG = 0x20000000;
         GUInt32 nGSrsFlag = CPL_LSBWORD32( WKBSRIDFLAG );
         // Apply the flag.
         geomType = geomType | nGSrsFlag;

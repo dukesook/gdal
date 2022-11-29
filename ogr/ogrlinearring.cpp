@@ -33,13 +33,13 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "cpl_error.h"
 #include "ogr_core.h"
 #include "ogr_geometry.h"
 #include "ogr_p.h"
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                           OGRLinearRing()                            */

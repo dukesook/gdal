@@ -33,7 +33,6 @@
 
 #include <limits>
 
-CPL_CVSID("$Id$")
 
 template<typename T> inline double GetSrcVal(const void* pSource, GDALDataType eSrcType, T ii)
 {
@@ -41,6 +40,7 @@ template<typename T> inline double GetSrcVal(const void* pSource, GDALDataType e
     {
         case GDT_Unknown: return 0;
         case GDT_Byte: return static_cast<const GByte*>(pSource)[ii];
+        case GDT_Int8: return static_cast<const GInt8*>(pSource)[ii];
         case GDT_UInt16: return static_cast<const GUInt16*>(pSource)[ii];
         case GDT_Int16: return static_cast<const GInt16*>(pSource)[ii];
         case GDT_UInt32: return static_cast<const GUInt32*>(pSource)[ii];

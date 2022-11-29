@@ -46,7 +46,6 @@
 #include "../vrt/gdal_vrt.h"
 #include "../vrt/vrtdataset.h"
 
-CPL_CVSID("$Id$")
 
 using namespace std;
 
@@ -103,8 +102,6 @@ static void GenerateTiles(const std::string& filename,
             GDALRasterBand* poBand = poSrcDs->GetRasterBand(band);
             int hasNoData = 0;
             const double noDataValue = poBand->GetNoDataValue(&hasNoData);
-            const char* pixelType = poBand->GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE");
-            const bool isSigned = ( pixelType && (strcmp(pixelType, "SIGNEDBYTE") == 0) );
 
             int yOffset = ry + row * rowOffset;
             CPLErr errTest =
@@ -124,12 +121,7 @@ static void GenerateTiles(const std::string& filename,
                     for (int j = 0; j < dxsize; j++)
                     {
                         double v = pabyScanline[j];
-                        double tmpv = v;
-                        if (isSigned)
-                        {
-                            tmpv -= 128;
-                        }
-                        if (tmpv == noDataValue || bReadFailed)
+                        if (v == noDataValue || bReadFailed)
                         {
                             hadnoData[j] = true;
                         }
@@ -1012,6 +1004,8 @@ KmlSuperOverlayReadDataset::KmlSuperOverlayReadDataset() :
     psFirstLink(nullptr),
     psLastLink(nullptr)
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    m_oSRS.importFromWkt(SRS_WKT_WGS84_LAT_LONG);
     adfGeoTransform[0] = 0.0;
     adfGeoTransform[1] = 1.0;
     adfGeoTransform[2] = 0.0;
@@ -1079,13 +1073,13 @@ int KmlSuperOverlayReadDataset::CloseDependentDatasets()
 }
 
 /************************************************************************/
-/*                          GetProjectionRef()                          */
+/*                          GetSpatialRef()                             */
 /************************************************************************/
 
-const char *KmlSuperOverlayReadDataset::_GetProjectionRef()
+const OGRSpatialReference *KmlSuperOverlayReadDataset::GetSpatialRef() const
 
 {
-    return SRS_WKT_WGS84_LAT_LONG;
+    return &m_oSRS;
 }
 
 /************************************************************************/
@@ -1878,6 +1872,7 @@ struct KmlSingleDocRasterTilesDesc
 class KmlSingleDocRasterDataset final: public GDALDataset
 {
         friend class KmlSingleDocRasterRasterBand;
+        OGRSpatialReference m_oSRS{};
         CPLString osDirname;
         CPLString osNominalExt;
         GDALDataset* poCurTileDS;
@@ -1903,10 +1898,7 @@ class KmlSingleDocRasterDataset final: public GDALDataset
             return CE_None;
         }
 
-        virtual const char *_GetProjectionRef() override { return SRS_WKT_WGS84_LAT_LONG; }
-        const OGRSpatialReference* GetSpatialRef() const override {
-            return GetSpatialRefFromOldGetProjectionRef();
-        }
+        const OGRSpatialReference* GetSpatialRef() const override { return &m_oSRS; }
 
         void BuildOverviews();
 
@@ -1938,6 +1930,8 @@ class KmlSingleDocRasterRasterBand final: public GDALRasterBand
 
 KmlSingleDocRasterDataset::KmlSingleDocRasterDataset()
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    m_oSRS.importFromWkt(SRS_WKT_WGS84_LAT_LONG);
     poCurTileDS = nullptr;
     nLevel = 0;
     nTileSize = 0;

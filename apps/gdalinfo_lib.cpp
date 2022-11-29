@@ -33,6 +33,7 @@
 #include "gdal_utils_priv.h"
 
 #include <cmath>
+#include <limits>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,7 +62,6 @@
 
 using std::vector;
 
-CPL_CVSID("$Id$")
 
 /*! output format */
 typedef enum {
@@ -862,6 +862,9 @@ char *GDALInfo( GDALDatasetH hDataset, const GDALInfoOptions *psOptions )
             {
             case GDT_Byte:
                 stacDataType = "uint8";
+                break;
+            case GDT_Int8:
+                stacDataType = "int8";
                 break;
             case GDT_UInt16:
                 stacDataType = "uint16";

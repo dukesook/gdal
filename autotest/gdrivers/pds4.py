@@ -37,6 +37,8 @@ import pytest
 
 from osgeo import gdal, ogr, osr
 
+pytestmark = pytest.mark.require_driver("PDS4")
+
 ###############################################################################
 # Validate XML file against schemas
 
@@ -736,6 +738,7 @@ def test_pds4_11():
     filename = "/vsimem/out.xml"
     for (dt, data) in [
         (gdal.GDT_Byte, struct.pack("B", 255)),
+        (gdal.GDT_Int8, struct.pack("b", -128)),
         (gdal.GDT_UInt16, struct.pack("H", 65535)),
         (gdal.GDT_Int16, struct.pack("h", -32768)),
         (gdal.GDT_UInt32, struct.pack("I", 4000000000)),
@@ -1804,7 +1807,7 @@ def check_pds4_oblique_cylindrical(filename):
         ds.GetSpatialRef()
         .ExportToProj4()
         .startswith(
-            "+proj=ob_tran +R=2575000 +o_proj=eqc +o_lon_p=-158.352054 +o_lat_p=191.769776 +lon_0=-163.331591 "
+            "+proj=ob_tran +o_proj=eqc +o_lon_p=-158.352054 +o_lat_p=191.769776 +lon_0=-163.331591 +R=2575000 "
         )
     )
     assert ds.GetGeoTransform() == pytest.approx(

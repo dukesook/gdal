@@ -40,7 +40,6 @@
 #include "gdal.h"
 #include "gdal_priv_templates.hpp"
 
-CPL_CVSID("$Id$")
 
 //! @cond Doxygen_Suppress
 /************************************************************************/
@@ -92,6 +91,7 @@ static GDALDataType GetWorkDataType(GDALDataType eDataType)
         eWrkDT = GDT_UInt32;
         break;
 
+      case GDT_Int8:
       case GDT_Int16:
       case GDT_Int32:
       case GDT_CInt16:

@@ -30,6 +30,7 @@
 
 #include <assert.h>
 #include <algorithm>
+#include <limits>
 #include <queue>
 #include <set>
 
@@ -815,13 +816,8 @@ bool GDALGroup::CopyFrom( const std::shared_ptr<GDALGroup>& poDstRootGroup,
                         {
                             const char* pszDataType = pszOption + strlen("AUTOSCALE_DATA_TYPE=");
                             eAutoScaleType = GDALGetDataTypeByName(pszDataType);
-                            if( eAutoScaleType != GDT_Byte &&
-                                eAutoScaleType != GDT_UInt16 &&
-                                eAutoScaleType != GDT_Int16 &&
-                                eAutoScaleType != GDT_UInt32 &&
-                                eAutoScaleType != GDT_Int32 &&
-                                eAutoScaleType != GDT_UInt64 &&
-                                eAutoScaleType != GDT_Int64 )
+                            if( GDALDataTypeIsComplex(eAutoScaleType) ||
+                                GDALDataTypeIsFloating(eAutoScaleType) )
                             {
                                 CPLError(CE_Failure, CPLE_NotSupported,
                                          "Unsupported value for AUTOSCALE_DATA_TYPE");
@@ -877,13 +873,21 @@ bool GDALGroup::CopyFrom( const std::shared_ptr<GDALGroup>& poDstRootGroup,
                 switch( eAutoScaleType )
                 {
                     case GDT_Byte:   setDTMinMax(GByte); break;
+                    case GDT_Int8:   setDTMinMax(GInt8); break;
                     case GDT_UInt16: setDTMinMax(GUInt16); break;
                     case GDT_Int16:  setDTMinMax(GInt16); break;
                     case GDT_UInt32: setDTMinMax(GUInt32); break;
                     case GDT_Int32:  setDTMinMax(GInt32); break;
                     case GDT_UInt64: setDTMinMax(std::uint64_t); break;
                     case GDT_Int64:  setDTMinMax(std::int64_t); break;
-                    default:
+                    case GDT_Float32:
+                    case GDT_Float64:
+                    case GDT_Unknown:
+                    case GDT_CInt16:
+                    case GDT_CInt32:
+                    case GDT_CFloat32:
+                    case GDT_CFloat64:
+                    case GDT_TypeCount:
                         CPLAssert(false);
                 }
 
@@ -1333,6 +1337,9 @@ bool GDALExtendedDataType::CopyValue(const void* pSrc,
             case GDT_Byte:
                 str = CPLSPrintf("%d", *static_cast<const GByte*>(pSrc));
                 break;
+            case GDT_Int8:
+                str = CPLSPrintf("%d", *static_cast<const GInt8*>(pSrc));
+                break;
             case GDT_UInt16:
                 str = CPLSPrintf("%d", *static_cast<const GUInt16*>(pSrc));
                 break;
@@ -1684,7 +1691,7 @@ bool GDALAbstractMDArray::CheckReadWriteParams(const GUInt64* arrayStartIdx,
                     return false;
                 }
             }
-#if SIZEOF_VOID == 4
+#if SIZEOF_VOIDP == 4
             if( static_cast<size_t>(nOffset) != nOffset )
             {
                 lamda_error();
@@ -2992,8 +2999,10 @@ CPLStringList GDALAttribute::ReadAsStringArray() const
 std::vector<int> GDALAttribute::ReadAsIntArray() const
 {
     const auto nElts = GetTotalElementsCount();
+#if SIZEOF_VOIDP == 4
     if( nElts > static_cast<size_t>(nElts) )
         return {};
+#endif
     std::vector<int> res(static_cast<size_t>(nElts));
     const auto& dims = GetDimensions();
     const auto nDims = GetDimensionCount();
@@ -3020,8 +3029,10 @@ std::vector<int> GDALAttribute::ReadAsIntArray() const
 std::vector<double> GDALAttribute::ReadAsDoubleArray() const
 {
     const auto nElts = GetTotalElementsCount();
+#if SIZEOF_VOIDP == 4
     if( nElts > static_cast<size_t>(nElts) )
         return {};
+#endif
     std::vector<double> res(static_cast<size_t>(nElts));
     const auto& dims = GetDimensions();
     const auto nDims = GetDimensionCount();
@@ -4659,10 +4670,10 @@ static std::shared_ptr<GDALMDArray> CreateSlicedArray(
             GDALSlicedMDArray::Range range;
             const GUInt64 nDimSize(srcDims[nCurSrcDim]->GetSize());
             range.m_nIncr = EQUAL(pszInc, "") ? 1 : CPLAtoGIntBig(pszInc);
-            if( range.m_nIncr == 0 )
+            if( range.m_nIncr == 0 || range.m_nIncr == std::numeric_limits<GInt64>::min() )
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                            "Invalid increment 0");
+                            "Invalid increment");
                 return nullptr;
             }
             auto startIdx(CPLAtoGIntBig(pszStart));
@@ -4673,9 +4684,10 @@ static std::shared_ptr<GDALMDArray> CreateSlicedArray(
                 else
                     startIdx = nDimSize + startIdx;
             }
+            const bool bPosIncr = range.m_nIncr > 0;
             range.m_nStartIdx = startIdx;
             range.m_nStartIdx = EQUAL(pszStart, "") ?
-                (range.m_nIncr > 0 ? 0 : nDimSize-1) :
+                (bPosIncr ? 0 : nDimSize-1) :
                 range.m_nStartIdx;
             if( range.m_nStartIdx >= nDimSize - 1)
                 range.m_nStartIdx = nDimSize - 1;
@@ -4690,21 +4702,20 @@ static std::shared_ptr<GDALMDArray> CreateSlicedArray(
             }
             GUInt64 nEndIdx = endIdx;
             nEndIdx = EQUAL(pszEnd, "") ?
-                (range.m_nIncr < 0 ? 0 : nDimSize) :
+                (!bPosIncr ? 0 : nDimSize) :
                     nEndIdx;
-            if( (range.m_nIncr > 0 && range.m_nStartIdx >= nEndIdx) ||
-                (range.m_nIncr < 0 && range.m_nStartIdx <= nEndIdx) )
+            if( (bPosIncr && range.m_nStartIdx >= nEndIdx) ||
+                (!bPosIncr && range.m_nStartIdx <= nEndIdx) )
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
                             "Output dimension of size 0 is not allowed");
                 return nullptr;
             }
-            int inc = (EQUAL(pszEnd, "") && range.m_nIncr < 0) ? 1 : 0;
-            const GUInt64 newSize = range.m_nIncr > 0 ?
-                (nEndIdx - range.m_nStartIdx) / range.m_nIncr +
-                    (((inc + nEndIdx - range.m_nStartIdx) % range.m_nIncr) ? 1 : 0):
-                (inc + range.m_nStartIdx - nEndIdx) / -range.m_nIncr +
-                    (((inc + range.m_nStartIdx - nEndIdx) % -range.m_nIncr) ? 1 : 0);
+            int inc = (EQUAL(pszEnd, "") && !bPosIncr) ? 1 : 0;
+            const auto nAbsIncr = std::abs(range.m_nIncr);
+            const GUInt64 newSize = bPosIncr ?
+                DIV_ROUND_UP(nEndIdx - range.m_nStartIdx, nAbsIncr):
+                DIV_ROUND_UP(inc + range.m_nStartIdx - nEndIdx, nAbsIncr);
             if( range.m_nStartIdx == 0 &&
                 range.m_nIncr == 1 &&
                 newSize == srcDims[nCurSrcDim]->GetSize() )
@@ -6113,6 +6124,15 @@ lbl_return_to_caller:
                                 bHasValidMax, dfValidMax);
             break;
 
+        case GDT_Int8:
+            ReadInternal<GInt8>(count, bufferStride, bufferDataType, pDstBuffer,
+                                pTempBuffer, oTmpBufferDT, tmpBufferStrideVector,
+                                bHasMissingValue, dfMissingValue,
+                                bHasFillValue, dfFillValue,
+                                bHasValidMin, dfValidMin,
+                                bHasValidMax, dfValidMax);
+            break;
+
         case GDT_UInt16:
             ReadInternal<GUInt16>(count, bufferStride, bufferDataType, pDstBuffer,
                                 pTempBuffer, oTmpBufferDT, tmpBufferStrideVector,
@@ -6176,8 +6196,7 @@ lbl_return_to_caller:
                                 bHasValidMax, dfValidMax);
             break;
 
-        default:
-            CPLAssert(oTmpBufferDT.GetNumericDataType() == GDT_Float64);
+        case GDT_Float64:
             ReadInternal<double>(count, bufferStride, bufferDataType, pDstBuffer,
                                 pTempBuffer, oTmpBufferDT, tmpBufferStrideVector,
                                 bHasMissingValue, dfMissingValue,
@@ -6185,7 +6204,14 @@ lbl_return_to_caller:
                                 bHasValidMin, dfValidMin,
                                 bHasValidMax, dfValidMax);
             break;
-
+        case GDT_Unknown:
+        case GDT_CInt16:
+        case GDT_CInt32:
+        case GDT_CFloat32:
+        case GDT_CFloat64:
+        case GDT_TypeCount:
+            CPLAssert(false);
+            break;
     }
 
     VSIFree(pTempBuffer);
@@ -11567,6 +11593,7 @@ struct GDALPamMultiDim::Private
     struct ArrayInfo
     {
         std::shared_ptr<OGRSpatialReference> poSRS{};
+        // cppcheck-suppress unusedStructMember
         Statistics stats{};
     };
 

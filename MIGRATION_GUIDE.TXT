@@ -1,3 +1,26 @@
+MIGRATION GUIDE FROM GDAL 3.6 to GDAL 3.7
+-----------------------------------------
+
+- Following RFC 87, PIXELTYPE=SIGNEDBYTE in IMAGE_STRUCTURE metadata domain is
+  no longer reported by drivers that used to do it. The new GDT_Int8 data type
+  is now reported.
+  On writing, the PIXELTYPE=SIGNEDBYTE creation option is preserved in drivers
+  that used to support it, but is deprecated and external code should rather use
+  the GDT_Int8 data type.
+
+MIGRATION GUIDE FROM GDAL 3.5 to GDAL 3.6
+-----------------------------------------
+
+- Out-of-tree vector drivers:
+  * GDALDataset::IBuildOverviews(): parameters panOverviewList and panBandList
+    are now of type 'const int*' (previously 'int*')
+    Added a CSLConstList papszOptions member.
+  * GDALRasterBand::BuildOverviews(): parameter panOverviewList is now of
+    type 'const int*' (previously 'int*')
+    Added a CSLConstList papszOptions member.
+  * Compatibility layers of GDAL 3.0 _GetProjectionRef(), _GetGCPProjectionRef(),
+    _SetProjection(), _SetGCPs() have been removed
+
 MIGRATION GUIDE FROM GDAL 3.4 to GDAL 3.5
 -----------------------------------------
 

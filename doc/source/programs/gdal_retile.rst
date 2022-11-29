@@ -17,7 +17,7 @@ Synopsis
 
     gdal_retile.py [-v] [-co NAME=VALUE]* [-of out_format] [-ps pixelWidth pixelHeight]
                    [-overlap val_in_pixel]
-                   [-ot  {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/
+                   [-ot  {Byte/Int8/Int16/UInt16/UInt32/Int32/Float32/Float64/
                            CInt16/CInt32/CFloat32/CFloat64}]'
                    [ -tileIndex tileIndexName [-tileIndexField tileIndexFieldName]]
                    [ -csv fileName [-csvDelim delimiter]]
@@ -32,7 +32,11 @@ Description
 
 This utility will retile a set of input tile(s). All the input tile(s) must
 be georeferenced in the same coordinate system and have a matching number of bands.
-Optionally pyramid levels are generated. It  is  possible to generate  shape file(s) for the tiled output.
+
+Optionally pyramid levels are generated. All pyramid levels are generated from the
+input tiles (not from previous levels).
+
+It is possible to generate shape file(s) for the tiled output.
 
 If your number of input tiles exhausts the command line buffer, use the general
 :ref:`--optfile <raster_common_options_optfile>` option

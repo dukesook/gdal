@@ -35,6 +35,8 @@ import pytest
 
 from osgeo import gdal
 
+pytestmark = pytest.mark.require_driver("DIMAP")
+
 ###############################################################################
 # Open and verify a the GCPs and metadata.
 
@@ -135,7 +137,7 @@ def test_dimap_2_single_component():
             "VIEWING_ANGLE": "CENTER_VIEWING_ANGLE",
             "VIEWING_ANGLE_ACROSS_TRACK": "CENTER_VIEWING_ANGLE_ACROSS_TRACK",
             "VIEWING_ANGLE_ALONG_TRACK": "CENTER_VIEWING_ANGLE_ALONG_TRACK",
-            "SATELLITE_ALTITUDE": "CENTER_SATELITTE_ALTITUDE",
+            "SATELLITE_ALTITUDE": "CENTER_SATELLITE_ALTITUDE",
             "INCIDENCE_ANGLE": "CENTER_INCIDENCE_ANGLE",
             "INCIDENCE_ANGLE_ACROSS_TRACK": "CENTER_INCIDENCE_ANGLE_ACROSS_TRACK",
             "INCIDENCE_ANGLE_ALONG_TRACK": "CENTER_INCIDENCE_ANGLE_ALONG_TRACK",

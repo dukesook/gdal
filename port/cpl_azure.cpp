@@ -26,6 +26,7 @@
  ****************************************************************************/
 
 #include "cpl_azure.h"
+#include "cpl_json.h"
 #include "cpl_vsi_error.h"
 #include "cpl_sha256.h"
 #include "cpl_time.h"
@@ -36,7 +37,6 @@
 
 //! @cond Doxygen_Suppress
 
-CPL_CVSID("$Id$")
 
 #ifdef HAVE_CURL
 
@@ -225,47 +225,6 @@ CPLString AzureCSGetParameter(const CPLString& osStr, const char* pszKey,
 }
 
 /************************************************************************/
-/*                          ParseSimpleJson()                           */
-/*                                                                      */
-/*      Return a string list of name/value pairs extracted from a       */
-/*      JSON doc.  The EC2 IAM web service returns simple JSON          */
-/*      responses.  The parsing as done currently is very fragile       */
-/*      and depends on JSON documents being in a very very simple       */
-/*      form.                                                           */
-/************************************************************************/
-
-static CPLStringList ParseSimpleJson(const char *pszJson)
-
-{
-/* -------------------------------------------------------------------- */
-/*      We are expecting simple documents like the following with no    */
-/*      hierarchy or complex structure.                                 */
-/* -------------------------------------------------------------------- */
-/*
-    {
-    "Code" : "Success",
-    "LastUpdated" : "2017-07-03T16:20:17Z",
-    "Type" : "AWS-HMAC",
-    "AccessKeyId" : "bla",
-    "SecretAccessKey" : "bla",
-    "Token" : "bla",
-    "Expiration" : "2017-07-03T22:42:58Z"
-    }
-*/
-
-    CPLStringList oWords(
-        CSLTokenizeString2(pszJson, " \n\t,:{}", CSLT_HONOURSTRINGS ));
-    CPLStringList oNameValue;
-
-    for( int i=0; i < oWords.size(); i += 2 )
-    {
-        oNameValue.SetNameValue(oWords[i], oWords[i+1]);
-    }
-
-    return oNameValue;
-}
-
-/************************************************************************/
 /*                GetConfigurationFromManagedIdentities()               */
 /************************************************************************/
 
@@ -305,7 +264,7 @@ static bool GetConfigurationFromManagedIdentities(CPLString& osAccessToken)
         {
             const CPLString osJSon =
                     reinterpret_cast<char*>(psResult->pabyData);
-            oResponse = ParseSimpleJson(osJSon);
+            oResponse = CPLParseKeyValueJson(osJSon);
             if( oResponse.FetchNameValue("error") )
             {
                 CPLDebug("AZURE", "Cannot retrieve managed identities credentials: %s",
@@ -528,14 +487,14 @@ bool VSIAzureBlobHandleHelper::GetConfiguration(const std::string& osPathForOpti
     bFromManagedIdentities = false;
 
     const CPLString osServicePrefix ( eService == Service::SERVICE_BLOB ? "blob" : "dfs" );
-    bUseHTTPS = CPLTestBool(VSIGetCredential(
+    bUseHTTPS = CPLTestBool(VSIGetPathSpecificOption(
         osPathForOption.c_str(), "CPL_AZURE_USE_HTTPS", "YES"));
-    osEndpoint = VSIGetCredential(
+    osEndpoint = VSIGetPathSpecificOption(
         osPathForOption.c_str(), "CPL_AZURE_ENDPOINT", "");
 
     const CPLString osStorageConnectionString(
         CSLFetchNameValueDef(papszOptions, "AZURE_STORAGE_CONNECTION_STRING",
-        VSIGetCredential(osPathForOption.c_str(), "AZURE_STORAGE_CONNECTION_STRING", "")));
+        VSIGetPathSpecificOption(osPathForOption.c_str(), "AZURE_STORAGE_CONNECTION_STRING", "")));
     if( !osStorageConnectionString.empty() )
     {
         return ParseStorageConnectionString(osStorageConnectionString,
@@ -549,7 +508,7 @@ bool VSIAzureBlobHandleHelper::GetConfiguration(const std::string& osPathForOpti
     {
         osStorageAccount = CSLFetchNameValueDef(papszOptions,
             "AZURE_STORAGE_ACCOUNT",
-            VSIGetCredential(osPathForOption.c_str(), "AZURE_STORAGE_ACCOUNT", ""));
+            VSIGetPathSpecificOption(osPathForOption.c_str(), "AZURE_STORAGE_ACCOUNT", ""));
         if( !osStorageAccount.empty() )
         {
             if( osEndpoint.empty() )
@@ -557,21 +516,21 @@ bool VSIAzureBlobHandleHelper::GetConfiguration(const std::string& osPathForOpti
 
             osAccessToken = CSLFetchNameValueDef(papszOptions,
                 "AZURE_STORAGE_ACCESS_TOKEN",
-                VSIGetCredential(osPathForOption.c_str(), "AZURE_STORAGE_ACCESS_TOKEN", ""));
+                VSIGetPathSpecificOption(osPathForOption.c_str(), "AZURE_STORAGE_ACCESS_TOKEN", ""));
             if( !osAccessToken.empty() )
                 return true;
 
             osStorageKey = CSLFetchNameValueDef(papszOptions,
                 "AZURE_STORAGE_ACCESS_KEY",
-                VSIGetCredential(osPathForOption.c_str(), "AZURE_STORAGE_ACCESS_KEY", ""));
+                VSIGetPathSpecificOption(osPathForOption.c_str(), "AZURE_STORAGE_ACCESS_KEY", ""));
             if( osStorageKey.empty() )
             {
-                osSAS = VSIGetCredential(osPathForOption.c_str(),
+                osSAS = VSIGetPathSpecificOption(osPathForOption.c_str(),
                                          "AZURE_STORAGE_SAS_TOKEN",
                                          CPLGetConfigOption("AZURE_SAS", "")); // AZURE_SAS for GDAL < 3.5
                 if( osSAS.empty() )
                 {
-                    if( CPLTestBool(VSIGetCredential(
+                    if( CPLTestBool(VSIGetPathSpecificOption(
                             osPathForOption.c_str(), "AZURE_NO_SIGN_REQUEST", "NO")) )
                     {
                         return true;
@@ -659,7 +618,7 @@ VSIAzureBlobHandleHelper* VSIAzureBlobHandleHelper::BuildFromURI( const char* ps
         return nullptr;
     }
 
-    if( CPLTestBool(VSIGetCredential(
+    if( CPLTestBool(VSIGetPathSpecificOption(
             osPathForOption.c_str(), "AZURE_NO_SIGN_REQUEST", "NO")) )
     {
         osStorageKey.clear();

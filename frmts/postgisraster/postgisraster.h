@@ -145,7 +145,6 @@ enum class OutDBResolution
 typedef struct {
     GDALDataType eDataType;
     int nBitsDepth;
-    GBool bSignedByte;
     GBool bHasNoDataValue;
     GBool bIsOffline;
     char * path;
@@ -163,7 +162,7 @@ typedef struct {
 char * ReplaceQuotes(const char *, int);
 char * ReplaceSingleQuotes(const char *, int);
 char ** ParseConnectionString(const char *);
-GBool TranslateDataType(const char *, GDALDataType *, int *, GBool *);
+GBool TranslateDataType(const char *, GDALDataType *, int *);
 
 class PostGISRasterRasterBand;
 class PostGISRasterTileDataset;
@@ -222,7 +221,7 @@ private:
     char * pszPrimaryKeyName;
     GBool  bIsFastPK;
     int bHasTriedFetchingPrimaryKeyName;
-    char* pszProjection;
+    mutable OGRSpatialReference m_oSRS{};
     ResolutionStrategy resolutionStrategy;
     WorkingMode nMode;
     OutDBResolution eOutDBResolution{OutDBResolution::SERVER_SIDE};
@@ -324,14 +323,9 @@ public:
     static CPLErr Delete(const char*);
     virtual char      **GetMetadataDomainList() override;
     char ** GetMetadata(const char *) override;
-    const char* _GetProjectionRef() override;
-    CPLErr _SetProjection(const char*) override;
-    const OGRSpatialReference* GetSpatialRef() const override {
-        return GetSpatialRefFromOldGetProjectionRef();
-    }
-    CPLErr SetSpatialRef(const OGRSpatialReference* poSRS) override {
-        return OldSetProjectionFromSetSpatialRef(poSRS);
-    }
+
+    const OGRSpatialReference* GetSpatialRef() const override;
+    CPLErr SetSpatialRef(const OGRSpatialReference* poSRS) override;
 
     CPLErr SetGeoTransform(double *) override;
     CPLErr GetGeoTransform(double *) override;

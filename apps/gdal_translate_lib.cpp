@@ -56,7 +56,6 @@
 #include "ogr_spatialref.h"
 #include "vrtdataset.h"
 
-CPL_CVSID("$Id$")
 
 static int ArgIsNumeric( const char * );
 static void AttachMetadata( GDALDatasetH, char ** );
@@ -613,9 +612,11 @@ static double AdjustNoDataValue( double dfInputNoDataValue,
 {
     bool bSignedByte = false;
     const char* pszPixelType = CSLFetchNameValue( psOptions->papszCreateOptions, "PIXELTYPE" );
-    if( pszPixelType == nullptr )
+    if( pszPixelType == nullptr && poBand->GetRasterDataType() == GDT_Byte )
     {
+        poBand->EnablePixelTypeSignedByteWarning(false);
         pszPixelType = poBand->GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE");
+        poBand->EnablePixelTypeSignedByteWarning(true);
     }
     if( pszPixelType != nullptr && EQUAL(pszPixelType, "SIGNEDBYTE") )
         bSignedByte = true;
@@ -1604,8 +1605,10 @@ GDALDatasetH GDALTranslate( const char *pszDest, GDALDatasetH hSrcDataset,
     static_assert(sizeof(adfSrcWinOri) == sizeof(psOptions->adfSrcWin),
                   "inconsistent adfSrcWin size");
     memcpy(adfSrcWinOri, psOptions->adfSrcWin, sizeof(psOptions->adfSrcWin));
-    const double dfRatioX = static_cast<double>(poSrcDSOri->GetRasterXSize()) / poSrcDS->GetRasterXSize();
-    const double dfRatioY = static_cast<double>(poSrcDSOri->GetRasterYSize()) / poSrcDS->GetRasterYSize();
+    const double dfRatioX = poSrcDS->GetRasterXSize() == 0 ? 1.0 :
+        static_cast<double>(poSrcDSOri->GetRasterXSize()) / poSrcDS->GetRasterXSize();
+    const double dfRatioY = poSrcDS->GetRasterYSize() == 0 ? 1.0 :
+        static_cast<double>(poSrcDSOri->GetRasterYSize()) / poSrcDS->GetRasterYSize();
     psOptions->adfSrcWin[0] /= dfRatioX;
     psOptions->adfSrcWin[1] /= dfRatioY;
     psOptions->adfSrcWin[2] /= dfRatioX;
@@ -1911,6 +1914,10 @@ GDALDatasetH GDALTranslate( const char *pszDest, GDALDatasetH hSrcDataset,
                             nDstMin = std::numeric_limits<std::uint8_t>::min();
                             nDstMax = std::numeric_limits<std::uint8_t>::max();
                             break;
+                        case GDT_Int8:
+                            nDstMin = std::numeric_limits<std::int8_t>::min();
+                            nDstMax = std::numeric_limits<std::int8_t>::max();
+                            break;
                         case GDT_UInt16:
                             nDstMin = std::numeric_limits<std::uint16_t>::min();
                             nDstMax = std::numeric_limits<std::uint16_t>::max();
@@ -1993,11 +2000,18 @@ GDALDatasetH GDALTranslate( const char *pszDest, GDALDatasetH hSrcDataset,
         }
 
         // Preserve PIXELTYPE if no option change values
-        const char* pszPixelType = poSrcBand->GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE");
-        if( pszPixelType && psOptions->nRGBExpand == 0 && psOptions->nScaleRepeat == 0 &&
-            !psOptions->bUnscale && psOptions->eOutputType == GDT_Unknown && psOptions->pszResampling == nullptr )
+        if( poSrcBand->GetRasterDataType() == GDT_Byte &&
+            psOptions->nRGBExpand == 0 && psOptions->nScaleRepeat == 0 &&
+            !psOptions->bUnscale && psOptions->eOutputType == GDT_Unknown &&
+            psOptions->pszResampling == nullptr )
         {
-            poVRTBand->SetMetadataItem("PIXELTYPE", pszPixelType, "IMAGE_STRUCTURE");
+            poSrcBand->EnablePixelTypeSignedByteWarning(false);
+            const char* pszPixelType = poSrcBand->GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE");
+            poSrcBand->EnablePixelTypeSignedByteWarning(true);
+            if( pszPixelType )
+            {
+                poVRTBand->SetMetadataItem("PIXELTYPE", pszPixelType, "IMAGE_STRUCTURE");
+            }
         }
 
         const char* pszCompression = poSrcBand->GetMetadataItem("COMPRESSION", "IMAGE_STRUCTURE");

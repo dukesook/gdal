@@ -38,7 +38,6 @@
 #include "gdal_priv.h"
 #include "ogr_core.h"
 
-CPL_CVSID("$Id$")
 
 // g++ -O2 -Wall -Wextra -g -shared -fPIC ogr/ogrsf_frmts/openfilegdb/*.cpp
 // -o ogr_OpenFileGDB.so -Iport -Igcore -Iogr -Iogr/ogrsf_frmts
@@ -275,13 +274,23 @@ void RegisterOGROpenFileGDB()
                                "Integer Real String Date DateTime Binary" );
     poDriver->SetMetadataItem( GDAL_DMD_CREATIONFIELDDATASUBTYPES, "Int16 Float32" );
     poDriver->SetMetadataItem( GDAL_DMD_ALTER_FIELD_DEFN_FLAGS, "Name Type WidthPrecision Nullable Default Domain" );
+    // see https://support.esri.com/en/technical-article/000010906
+    poDriver->SetMetadataItem( GDAL_DMD_ILLEGAL_FIELD_NAMES, "ADD ALTER AND BETWEEN BY COLUMN CREATE DELETE DROP EXISTS FOR FROM GROUP IN INSERT INTO IS LIKE NOT NULL OR ORDER SELECT SET TABLE UPDATE VALUES WHERE" );
     poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_FIELDS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_DEFAULT_FIELDS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_GEOMFIELDS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_MULTIPLE_VECTOR_LAYERS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_FIELD_DOMAINS, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_RENAME_LAYERS, "YES" );
+
     poDriver->SetMetadataItem( GDAL_DCAP_RELATIONSHIPS, "YES" );
+    poDriver->SetMetadataItem( GDAL_DCAP_CREATE_RELATIONSHIP, "YES" );
+    poDriver->SetMetadataItem( GDAL_DCAP_DELETE_RELATIONSHIP, "YES" );
+    poDriver->SetMetadataItem( GDAL_DCAP_UPDATE_RELATIONSHIP, "YES" );
+    poDriver->SetMetadataItem( GDAL_DMD_RELATIONSHIP_FLAGS, "OneToOne OneToMany ManyToMany Composite Association ForwardPathLabel BackwardPathLabel" );
+    poDriver->SetMetadataItem( GDAL_DMD_RELATIONSHIP_RELATED_TABLE_TYPES, "features media" );
+
+    poDriver->SetMetadataItem( GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE" );
 
     poDriver->SetMetadataItem( GDAL_DMD_CREATION_FIELD_DOMAIN_TYPES, "Coded Range" );
 

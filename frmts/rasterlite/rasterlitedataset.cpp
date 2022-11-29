@@ -43,7 +43,6 @@
 #define ENABLE_SQL_SQLITE_FORMAT
 #endif
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                        RasterliteOpenSQLiteDB()                      */
@@ -638,11 +637,11 @@ RasterliteDataset::RasterliteDataset() :
     papoOverviews(nullptr),
     nLimitOvrCount(-1),
     bValidGeoTransform(FALSE),
-    pszSRS(nullptr),
     poCT(nullptr),
     bCheckForExistingOverview(TRUE),
     hDS(nullptr)
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     memset( adfGeoTransform, 0, sizeof(adfGeoTransform) );
 }
 
@@ -664,7 +663,7 @@ RasterliteDataset::RasterliteDataset( RasterliteDataset* poMainDSIn,
     papoOverviews(poMainDSIn->papoOverviews + nLevelIn),
     nLimitOvrCount(-1),
     bValidGeoTransform(TRUE),
-    pszSRS(poMainDSIn->pszSRS),
+    m_oSRS(poMainDSIn->m_oSRS),
     poCT(poMainDSIn->poCT),
     osTableName(poMainDSIn->osTableName),
     osFileName(poMainDSIn->osFileName),
@@ -707,8 +706,6 @@ int RasterliteDataset::CloseDependentDatasets()
         papszSubDatasets = nullptr;
         CSLDestroy(papszImageStructure);
         papszImageStructure = nullptr;
-        CPLFree(pszSRS);
-        pszSRS = nullptr;
 
         if (papoOverviews)
         {
@@ -838,15 +835,12 @@ CPLErr RasterliteDataset::GetGeoTransform( double* padfGeoTransform )
 }
 
 /************************************************************************/
-/*                         GetProjectionRef()                           */
+/*                         GetSpatialRef()                              */
 /************************************************************************/
 
-const char* RasterliteDataset::_GetProjectionRef()
+const OGRSpatialReference* RasterliteDataset::GetSpatialRef() const
 {
-    if (pszSRS)
-        return pszSRS;
-
-    return "";
+    return m_oSRS.IsEmpty() ? nullptr : &m_oSRS;
 }
 
 /************************************************************************/
@@ -1353,7 +1347,7 @@ GDALDataset* RasterliteDataset::Open(GDALOpenInfo* poOpenInfo)
         OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hMetadataLyr);
         if (hSRS)
         {
-            OSRExportToWkt(hSRS, &poDS->pszSRS);
+            poDS->m_oSRS = *(OGRSpatialReference::FromHandle(hSRS));
         }
 
 /* -------------------------------------------------------------------- */

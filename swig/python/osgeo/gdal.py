@@ -162,6 +162,60 @@ def DontUseExceptions(*args) -> "void":
     r"""DontUseExceptions()"""
     return _gdal.DontUseExceptions(*args)
 
+class ExceptionMgr(object):
+    """
+    Context manager to manage Python Exception state
+    for GDAL/OGR/OSR/GNM.
+
+    Separate exception state is maintained for each
+    module (gdal, ogr, etc), and this class appears independently
+    in all of them. This is built in top of calls to the older
+    UseExceptions()/DontUseExceptions() functions.
+
+    Example::
+
+        >>> print(gdal.GetUseExceptions())
+        0
+        >>> with gdal.ExceptionMgr(useExceptions=True):
+        ...     # Exceptions are now in use
+        ...     print(gdal.GetUseExceptions())
+        1
+        >>>
+        >>> # Exception state has now been restored
+        >>> print(gdal.GetUseExceptions())
+        0
+
+    """
+    def __init__(self, useExceptions):
+        """
+        Save whether or not this context will be using exceptions
+        """
+        self.requestedUseExceptions = useExceptions
+
+    def __enter__(self):
+        """
+        On context entry, save the current GDAL exception state, and
+        set it to the state requested for the context
+
+        """
+        self.currentUseExceptions = (GetUseExceptions() != 0)
+
+        if self.requestedUseExceptions:
+            UseExceptions()
+        else:
+            DontUseExceptions()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        On exit, restore the GDAL/OGR/OSR/GNM exception state which was
+        current on entry to the context
+        """
+        if self.currentUseExceptions:
+            UseExceptions()
+        else:
+            DontUseExceptions()
+
+
 def VSIFReadL(*args) -> "void **":
     r"""VSIFReadL(unsigned int nMembSize, unsigned int nMembCount, VSILFILE fp) -> unsigned int"""
     return _gdal.VSIFReadL(*args)
@@ -821,7 +875,7 @@ def VectorTranslateOptions(options=None, format=None,
     format:
         format ("ESRI Shapefile", etc...)
     accessMode:
-        None for creation, 'update', 'append', 'overwrite'
+        None for creation, 'update', 'append', 'upsert', 'overwrite'
     srcSRS:
         source SRS
     dstSRS:
@@ -839,7 +893,7 @@ def VectorTranslateOptions(options=None, format=None,
     selectFields:
         list of fields to select
     addFields:
-        whether to add new fields found in source layers (to be used with accessMode == 'append')
+        whether to add new fields found in source layers (to be used with accessMode == 'append' or 'upsert')
     forceNullable:
         whether to drop NOT NULL constraints on newly created fields
     emptyStrAsNull:
@@ -907,6 +961,8 @@ def VectorTranslateOptions(options=None, format=None,
                 new_options += ['-append']
             elif accessMode == 'overwrite':
                 new_options += ['-overwrite']
+            elif accessMode == 'upsert':
+                new_options += ['-upsert']
             else:
                 raise Exception('unhandled accessMode')
         if addFields:
@@ -1977,6 +2033,10 @@ def GetThreadLocalConfigOption(*args) -> "char const *":
     r"""GetThreadLocalConfigOption(char const * pszKey, char const * pszDefault=None) -> char const *"""
     return _gdal.GetThreadLocalConfigOption(*args)
 
+def SetPathSpecificOption(*args) -> "void":
+    r"""SetPathSpecificOption(char const * pszPathPrefix, char const * pszKey, char const * pszValue)"""
+    return _gdal.SetPathSpecificOption(*args)
+
 def SetCredential(*args) -> "void":
     r"""SetCredential(char const * pszPathPrefix, char const * pszKey, char const * pszValue)"""
     return _gdal.SetCredential(*args)
@@ -1985,9 +2045,17 @@ def GetCredential(*args) -> "char const *":
     r"""GetCredential(char const * pszPathPrefix, char const * pszKey, char const * pszDefault=None) -> char const *"""
     return _gdal.GetCredential(*args)
 
+def GetPathSpecificOption(*args) -> "char const *":
+    r"""GetPathSpecificOption(char const * pszPathPrefix, char const * pszKey, char const * pszDefault=None) -> char const *"""
+    return _gdal.GetPathSpecificOption(*args)
+
 def ClearCredentials(*args) -> "void":
     r"""ClearCredentials(char const * pszPathPrefix=None)"""
     return _gdal.ClearCredentials(*args)
+
+def ClearPathSpecificOptions(*args) -> "void":
+    r"""ClearPathSpecificOptions(char const * pszPathPrefix=None)"""
+    return _gdal.ClearPathSpecificOptions(*args)
 
 def CPLBinaryToHex(*args) -> "retStringAndCPLFree *":
     r"""CPLBinaryToHex(int nBytes) -> retStringAndCPLFree *"""
@@ -2181,6 +2249,14 @@ def NetworkStatsGetAsSerializedJSON(*args) -> "retStringAndCPLFree *":
 def ParseCommandLine(*args) -> "char **":
     r"""ParseCommandLine(char const * utf8_path) -> char **"""
     return _gdal.ParseCommandLine(*args)
+
+def GetNumCPUs(*args) -> "int":
+    r"""GetNumCPUs() -> int"""
+    return _gdal.GetNumCPUs(*args)
+
+def GetUsablePhysicalRAM(*args) -> "GIntBig":
+    r"""GetUsablePhysicalRAM() -> GIntBig"""
+    return _gdal.GetUsablePhysicalRAM(*args)
 class MajorObject(object):
     r"""Proxy of C++ GDALMajorObjectShadow class."""
 
@@ -2508,7 +2584,7 @@ class Dataset(MajorObject):
         return _gdal.Dataset_SetGeoTransform(self, *args)
 
     def BuildOverviews(self, *args, **kwargs) -> "int":
-        r"""BuildOverviews(Dataset self, char const * resampling="NEAREST", int overviewlist=0, GDALProgressFunc callback=0, void * callback_data=None) -> int"""
+        r"""BuildOverviews(Dataset self, char const * resampling="NEAREST", int overviewlist=0, GDALProgressFunc callback=0, void * callback_data=None, char ** options=None) -> int"""
         return _gdal.Dataset_BuildOverviews(self, *args, **kwargs)
 
     def GetGCPCount(self, *args) -> "int":
@@ -2678,6 +2754,18 @@ class Dataset(MajorObject):
     def GetRelationship(self, *args) -> "GDALRelationshipShadow *":
         r"""GetRelationship(Dataset self, char const * name) -> Relationship"""
         return _gdal.Dataset_GetRelationship(self, *args)
+
+    def AddRelationship(self, *args) -> "bool":
+        r"""AddRelationship(Dataset self, Relationship relationship) -> bool"""
+        return _gdal.Dataset_AddRelationship(self, *args)
+
+    def DeleteRelationship(self, *args) -> "bool":
+        r"""DeleteRelationship(Dataset self, char const * name) -> bool"""
+        return _gdal.Dataset_DeleteRelationship(self, *args)
+
+    def UpdateRelationship(self, *args) -> "bool":
+        r"""UpdateRelationship(Dataset self, Relationship relationship) -> bool"""
+        return _gdal.Dataset_UpdateRelationship(self, *args)
 
     def ReadRaster1(self, *args, **kwargs) -> "CPLErr":
         r"""ReadRaster1(Dataset self, double xoff, double yoff, double xsize, double ysize, int * buf_xsize=None, int * buf_ysize=None, GDALDataType * buf_type=None, int band_list=0, GIntBig * buf_pixel_space=None, GIntBig * buf_line_space=None, GIntBig * buf_band_space=None, GDALRIOResampleAlg resample_alg=GRIORA_NearestNeighbour, GDALProgressFunc callback=0, void * callback_data=None, void * inputOutputBuf=None) -> CPLErr"""
@@ -3313,6 +3401,7 @@ class MDArray(object):
            count is None and buffer_stride is None and buffer_datatype is None:
             map_typecode_itemsize_to_gdal = {
                ('B', 1): GDT_Byte,
+               ('b', 1): GDT_Int8,
                ('h', 2): GDT_Int16,
                ('H', 2): GDT_UInt16,
                ('i', 4): GDT_Int32,
@@ -3544,7 +3633,7 @@ class Attribute(object):
               return s
           return self.ReadAsStringArray()
       if dt_class == GEDTC_NUMERIC:
-          if dt.GetNumericDataType() in (GDT_Byte, GDT_Int16, GDT_UInt16, GDT_Int32):
+          if dt.GetNumericDataType() in (GDT_Byte, GDT_Int8, GDT_Int16, GDT_UInt16, GDT_Int32):
               if self.GetTotalElementsCount() == 1:
                   return self.ReadAsInt()
               else:
@@ -4049,6 +4138,10 @@ class Band(MajorObject):
     def AsMDArray(self, *args) -> "GDALMDArrayHS *":
         r"""AsMDArray(Band self) -> MDArray"""
         return _gdal.Band_AsMDArray(self, *args)
+
+    def _EnablePixelTypeSignedByteWarning(self, *args) -> "void":
+        r"""_EnablePixelTypeSignedByteWarning(Band self, bool b)"""
+        return _gdal.Band__EnablePixelTypeSignedByteWarning(self, *args)
 
     def ReadRaster1(self, *args, **kwargs) -> "CPLErr":
         r"""ReadRaster1(Band self, double xoff, double yoff, double xsize, double ysize, int * buf_xsize=None, int * buf_ysize=None, GDALDataType * buf_type=None, GIntBig * buf_pixel_space=None, GIntBig * buf_line_space=None, GDALRIOResampleAlg resample_alg=GRIORA_NearestNeighbour, GDALProgressFunc callback=0, void * callback_data=None, void * inputOutputBuf=None) -> CPLErr"""
@@ -4664,6 +4757,10 @@ def GetJPEG2000Structure(*args) -> "CPLXMLNode *":
 def GetJPEG2000StructureAsString(*args) -> "retStringAndCPLFree *":
     r"""GetJPEG2000StructureAsString(char const * pszFilename, char ** options=None) -> retStringAndCPLFree *"""
     return _gdal.GetJPEG2000StructureAsString(*args)
+
+def HasTriangulation(*args) -> "int":
+    r"""HasTriangulation() -> int"""
+    return _gdal.HasTriangulation(*args)
 
 def GetDriverCount(*args) -> "int":
     r"""GetDriverCount() -> int"""

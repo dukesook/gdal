@@ -126,12 +126,7 @@ static GDALExtendedDataType BuildDataType(hid_t hDataType, bool& bHasVLen, bool&
 {
     const auto klass = H5Tget_class(hDataType);
     GDALDataType eDT = ::HDF5Dataset::GetDataType(hDataType);
-    if( H5Tequal(H5T_NATIVE_SCHAR, hDataType) )
-    {
-        bNonNativeDataType = true;
-        return GDALExtendedDataType::Create(GDT_Int16);
-    }
-    else if( eDT != GDT_Unknown )
+    if( eDT != GDT_Unknown )
         return GDALExtendedDataType::Create(eDT);
     else if (klass == H5T_STRING )
     {
@@ -1419,6 +1414,7 @@ static hid_t GetHDF5DataTypeFromGDALDataType(const GDALExtendedDataType& dt,
     switch( bufferDataType.GetNumericDataType() )
     {
         case GDT_Byte: hBufferType = H5Tcopy(H5T_NATIVE_UCHAR); break;
+        case GDT_Int8: hBufferType = H5Tcopy(H5T_NATIVE_SCHAR); break;
         case GDT_UInt16: hBufferType = H5Tcopy(H5T_NATIVE_USHORT); break;
         case GDT_Int16: hBufferType = H5Tcopy(H5T_NATIVE_SHORT); break;
         case GDT_UInt32: hBufferType = H5Tcopy(H5T_NATIVE_UINT); break;
@@ -1440,7 +1436,8 @@ static hid_t GetHDF5DataTypeFromGDALDataType(const GDALExtendedDataType& dt,
                 hBufferType = H5Tcopy(hNativeDT);
                 break;
             }
-        default:
+        case GDT_Unknown:
+        case GDT_TypeCount:
             return H5I_INVALID_HID;
     }
     return hBufferType;
@@ -1490,7 +1487,10 @@ static std::vector<unsigned> CreateMapTargetComponentsToSrc(
     {
         char* pszName = H5Tget_member_name(hSrcDataType, i);
         if( pszName )
+        {
             oMapSrcCompNameToIdx[pszName] = i;
+            H5free_memory(pszName);
+        }
     }
 
     std::vector<unsigned> ret;
@@ -1555,15 +1555,19 @@ static void CopyValue(const GByte* pabySrcBuffer, hid_t hSrcDataType,
         {
             const auto& comps = dstDataType.GetComponents();
             CPLAssert( comps.size() == mapDstCompsToSrcComps.size() );
-            const std::vector<unsigned> empty;
             for( size_t iDst = 0; iDst < comps.size(); ++iDst )
             {
                 const unsigned iSrc = mapDstCompsToSrcComps[iDst];
                 auto hMemberType = H5Tget_member_type(hSrcDataType, iSrc);
+                const auto mapDstSubCompsToSrcSubComps =
+                    (H5Tget_class(hMemberType) == H5T_COMPOUND &&
+                     comps[iDst]->GetType().GetClass() == GEDTC_COMPOUND) ?
+                    CreateMapTargetComponentsToSrc(hMemberType, comps[iDst]->GetType()) :
+                    std::vector<unsigned>();
                 CopyValue( pabySrcBuffer + H5Tget_member_offset(hSrcDataType, iSrc),
                            hMemberType,
                            pabyDstBuffer + comps[iDst]->GetOffset(),
-                           comps[iDst]->GetType(), empty );
+                           comps[iDst]->GetType(), mapDstSubCompsToSrcSubComps );
                 H5Tclose(hMemberType);
             }
         }
@@ -1576,21 +1580,10 @@ static void CopyValue(const GByte* pabySrcBuffer, hid_t hSrcDataType,
     }
     else
     {
-        if( H5Tequal(H5T_NATIVE_SCHAR, hSrcDataType) )
-        {
-            const GInt16 nVal = *reinterpret_cast<const signed char*>(pabySrcBuffer);
-            // coverity[overrun-buffer-val]
-            GDALExtendedDataType::CopyValue(
-                &nVal, GDALExtendedDataType::Create(GDT_Int16),
-                pabyDstBuffer, dstDataType);
-        }
-        else
-        {
-            GDALDataType eDT = ::HDF5Dataset::GetDataType(hSrcDataType);
-            GDALExtendedDataType::CopyValue(
-                pabySrcBuffer, GDALExtendedDataType::Create(eDT),
-                pabyDstBuffer, dstDataType);
-        }
+        GDALDataType eDT = ::HDF5Dataset::GetDataType(hSrcDataType);
+        GDALExtendedDataType::CopyValue(
+            pabySrcBuffer, GDALExtendedDataType::Create(eDT),
+            pabyDstBuffer, dstDataType);
     }
 }
 
@@ -1712,6 +1705,7 @@ bool HDF5Array::IRead(const GUInt64* arrayStartIdx,
         {
             auto hParent = H5Tget_super(m_hNativeDT);
             if( H5Tequal(hParent, H5T_NATIVE_UCHAR) ||
+                H5Tequal(hParent, H5T_NATIVE_SCHAR) ||
                 H5Tequal(hParent, H5T_NATIVE_USHORT) ||
                 H5Tequal(hParent, H5T_NATIVE_SHORT) ||
                 H5Tequal(hParent, H5T_NATIVE_UINT) ||
@@ -1995,6 +1989,7 @@ bool HDF5Attribute::IRead(const GUInt64* arrayStartIdx,
         {
             auto hParent = H5Tget_super(m_hNativeDT);
             if( H5Tequal(hParent, H5T_NATIVE_UCHAR) ||
+                H5Tequal(hParent, H5T_NATIVE_SCHAR) ||
                 H5Tequal(hParent, H5T_NATIVE_USHORT) ||
                 H5Tequal(hParent, H5T_NATIVE_SHORT) ||
                 H5Tequal(hParent, H5T_NATIVE_UINT) ||

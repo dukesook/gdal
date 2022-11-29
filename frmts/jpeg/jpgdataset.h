@@ -101,14 +101,6 @@ GDALDataset *JPEGDataset12CreateCopy( const char *pszFilename,
                                       void *pProgressData );
 #endif
 
-// Do we want to do special processing suitable for when JSAMPLE is a
-// 16bit value?
-#if defined(JPEG_LIB_MK1)
-#  define JPEG_LIB_MK1_OR_12BIT 1
-#elif BITS_IN_JSAMPLE == 12
-#  define JPEG_LIB_MK1_OR_12BIT 1
-#endif
-
 GDALRasterBand *JPGCreateBand(JPGDatasetCommon *poDS, int nBand);
 
 typedef void (*my_jpeg_write_m_header)(void *cinfo, int marker,
@@ -174,7 +166,7 @@ class JPGDatasetCommon CPL_NON_FINAL: public GDALPamDataset
     void          InitInternalOverviews();
     GDALDataset  *InitEXIFOverview();
 
-    char   *pszProjection;
+    OGRSpatialReference m_oSRS{};
     bool   bGeoTransformValid;
     double adfGeoTransform[6];
     int    nGCPCount;
@@ -247,8 +239,11 @@ class JPGDatasetCommon CPL_NON_FINAL: public GDALPamDataset
 
     virtual int         CloseDependentDatasets() override;
 
-    virtual CPLErr IBuildOverviews( const char *, int, int *, int, int *,
-                                    GDALProgressFunc, void * ) override;
+    virtual CPLErr IBuildOverviews( const char *,
+                                    int, const int *,
+                                    int, const int *,
+                                    GDALProgressFunc, void *,
+                                    CSLConstList papszOptions ) override;
 
   public:
                  JPGDatasetCommon();
@@ -264,10 +259,7 @@ class JPGDatasetCommon CPL_NON_FINAL: public GDALPamDataset
     virtual CPLErr GetGeoTransform( double * ) override;
 
     virtual int    GetGCPCount() override;
-    virtual const char *_GetGCPProjection() override;
-    const OGRSpatialReference* GetGCPSpatialRef() const override {
-        return GetGCPSpatialRefFromOldGetGCPProjection();
-    }
+    const OGRSpatialReference* GetGCPSpatialRef() const override;
     virtual const GDAL_GCP *GetGCPs() override;
 
     virtual char  **GetMetadataDomainList() override;

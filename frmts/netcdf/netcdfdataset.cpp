@@ -84,7 +84,6 @@
 #define NETCDF_USES_UTF8
 #endif
 
-CPL_CVSID("$Id$")
 
 // Internal function declarations.
 
@@ -118,12 +117,6 @@ static CPLErr NCDFPutAttr( int nCdfId, int nVarId,
 // Replace this where used.
 static CPLErr NCDFGet1DVar( int nCdfId, int nVarId, char **pszValue );
 static CPLErr NCDFPut1DVar( int nCdfId, int nVarId, const char *pszValue );
-
-static double NCDFGetDefaultNoDataValue( int nCdfId, int nVarId, int nVarType, bool& bGotNoData );
-#ifdef NETCDF_HAS_NC4
-static int64_t NCDFGetDefaultNoDataValueAsInt64( int nCdfId, int nVarId, bool& bGotNoData );
-static uint64_t NCDFGetDefaultNoDataValueAsUInt64( int nCdfId, int nVarId, bool& bGotNoData );
-#endif
 
 // Replace this where used.
 static char **NCDFTokenizeArray( const char *pszValue );
@@ -710,9 +703,7 @@ netCDFRasterBand::netCDFRasterBand( const netCDFRasterBand::CONSTRUCTOR_OPEN&,
 
         if( bSignedData )
         {
-            // set PIXELTYPE=SIGNEDBYTE
-            // See http://trac.osgeo.org/gdal/wiki/rfc14_imagestructure
-            GDALPamRasterBand::SetMetadataItem("PIXELTYPE", "SIGNEDBYTE", "IMAGE_STRUCTURE");
+            eDataType = GDT_Int8;
         }
         else if( dfNoData < 0 )
         {
@@ -981,9 +972,12 @@ netCDFRasterBand::netCDFRasterBand( const netCDFRasterBand::CONSTRUCTOR_CREATE&,
             nc_datatype = NC_BYTE;
 #ifdef NETCDF_HAS_NC4
             // NC_UBYTE (unsigned byte) is only available for NC4.
-            if( !bSignedData && (poNCDFDS->eFormat == NCDF_FORMAT_NC4) )
+            if( poNCDFDS->eFormat == NCDF_FORMAT_NC4 )
                 nc_datatype = NC_UBYTE;
 #endif
+            break;
+        case GDT_Int8:
+            nc_datatype = NC_BYTE;
             break;
         case GDT_Int16:
             nc_datatype = NC_SHORT;
@@ -1107,7 +1101,7 @@ netCDFRasterBand::netCDFRasterBand( const netCDFRasterBand::CONSTRUCTOR_CREATE&,
     }
 
     // For Byte data add signed/unsigned info.
-    if( eDataType == GDT_Byte )
+    if( eDataType == GDT_Byte || eDataType == GDT_Int8 )
     {
         if( bDefineVar )
         {
@@ -1121,7 +1115,7 @@ netCDFRasterBand::netCDFRasterBand( const netCDFRasterBand::CONSTRUCTOR_CREATE&,
                          "adding valid_range attributes for Byte Band");
                 short l_adfValidRange[2] = { 0, 0 };
                 int status;
-                if( bSignedData )
+                if( bSignedData || eDataType == GDT_Int8 )
                 {
                     l_adfValidRange[0] = -128;
                     l_adfValidRange[1] = 127;
@@ -1141,10 +1135,6 @@ netCDFRasterBand::netCDFRasterBand( const netCDFRasterBand::CONSTRUCTOR_CREATE&,
                 NCDF_ERR(status);
             }
         }
-        // For unsigned byte set PIXELTYPE=SIGNEDBYTE.
-        // See http://trac.osgeo.org/gdal/wiki/rfc14_imagestructure
-        if( bSignedData )
-            GDALPamRasterBand::SetMetadataItem("PIXELTYPE", "SIGNEDBYTE", "IMAGE_STRUCTURE");
     }
 
     if( nc_datatype != NC_BYTE &&
@@ -2414,6 +2404,14 @@ bool netCDFRasterBand::FetchNetcdfChunk( size_t xstart,
                                          nYChunkSize, false);
         }
     }
+    else if( eDataType == GDT_Int8 )
+    {
+        status = nc_get_vara_schar(cdfid, nZId, start, edge,
+                                   static_cast<signed char *>(pImageNC));
+        if( status == NC_NOERR )
+            CheckData<signed char>(pImage, pImageNC, edge[nBandXPos],
+                                   nYChunkSize, false);
+    }
     else if( nc_datatype == NC_SHORT )
     {
         status = nc_get_vara_short(cdfid, nZId, start, edge,
@@ -2766,6 +2764,11 @@ CPLErr netCDFRasterBand::IWriteBlock( CPL_UNUSED int nBlockXOff,
             status = nc_put_vara_uchar(cdfid, nZId, start, edge,
                                        static_cast<unsigned char *>(pImage));
     }
+    else if( eDataType == GDT_Int8 )
+    {
+        status = nc_put_vara_schar(cdfid, nZId, start, edge,
+                                   static_cast<signed char *>(pImage));
+    }
     else if( nc_datatype == NC_SHORT )
     {
         status = nc_put_vara_short(cdfid, nZId, start, edge,
@@ -2866,7 +2869,6 @@ netCDFDataset::netCDFDataset() :
     bufManager(CPLGetUsablePhysicalRAM() / 5),
 
     // projection/GT.
-    m_pszProjection(CPLStrdup("")),
     nXDimID(-1),
     nYDimID(-1),
     bIsProjected(false),
@@ -2886,6 +2888,8 @@ netCDFDataset::netCDFDataset() :
     nCreateMode(NC_CLOBBER),
     bSignedData(true)
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+
     // Projection/GT.
     m_adfGeoTransform[0] = 0.0;
     m_adfGeoTransform[1] = 1.0;
@@ -2941,7 +2945,6 @@ netCDFDataset::~netCDFDataset()
     CSLDestroy(papszSubDatasets);
     CSLDestroy(papszCreationOptions);
 
-    CPLFree(m_pszProjection);
     CPLFree(pszCFProjection);
 
     if( cdfid > 0 )
@@ -3080,15 +3083,15 @@ CPLErr netCDFDataset::SetMetadata( char** papszMD, const char* pszDomain )
 }
 
 /************************************************************************/
-/*                          GetProjectionRef()                          */
+/*                          GetSpatialRef()                             */
 /************************************************************************/
 
-const char *netCDFDataset::_GetProjectionRef()
+const OGRSpatialReference *netCDFDataset::GetSpatialRef() const
 {
     if( m_bHasProjection )
-        return m_pszProjection;
+        return m_oSRS.IsEmpty() ? nullptr : &m_oSRS;
 
-    return GDALPamDataset::_GetProjectionRef();
+    return GDALPamDataset::GetSpatialRef();
 }
 
 /************************************************************************/
@@ -3256,6 +3259,7 @@ void netCDFDataset::SetProjectionFromVar( int nGroupId, int nVarId,
 
     // These values from CF metadata.
     OGRSpatialReference oSRS;
+    oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     char szDimNameX[NC_MAX_NAME + 1];
     // char szDimNameY[NC_MAX_NAME + 1];
     size_t xdim = nRasterXSize;
@@ -3348,7 +3352,10 @@ void netCDFDataset::SetProjectionFromVar( int nGroupId, int nVarId,
                     {
                         m_bAddedProjectionVarsDefs = true;
                         m_bAddedProjectionVarsData = true;
-                        SetProjectionNoUpdate(pszWKT);
+                        OGRSpatialReference oSRSTmp;
+                        oSRSTmp.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+                        oSRSTmp.importFromWkt(pszWKT);
+                        SetSpatialRefNoUpdate(&oSRSTmp);
                     }
                     pszGeoTransform = FetchAttr(pszGridMappingValue,
                                                 NCDF_GEOTRANSFORM);
@@ -4247,7 +4254,7 @@ void netCDFDataset::SetProjectionFromVar( int nGroupId, int nVarId,
             {
                 m_bAddedProjectionVarsDefs = true;
                 m_bAddedProjectionVarsData = true;
-                SetProjectionNoUpdate(pszTempProjection);
+                SetSpatialRefNoUpdate(&oSRS);
             }
         }
         CPLFree(pszTempProjection);
@@ -4716,7 +4723,7 @@ void netCDFDataset::SetProjectionFromVar( int nGroupId, int nVarId,
                 {
                     m_bAddedProjectionVarsDefs = true;
                     m_bAddedProjectionVarsData = true;
-                    SetProjectionNoUpdate(pszWKTExport);
+                    SetSpatialRefNoUpdate(&oSRS);
                 }
                 CPLFree(pszWKTExport);
             }
@@ -4742,7 +4749,7 @@ void netCDFDataset::SetProjectionFromVar( int nGroupId, int nVarId,
             bCanCancelGT = !(osGeolocXName == szVarNameX &&
                              osGeolocYName == szVarNameY);
         }
-        if( bCanCancelGT && !oSRS.IsGeographic() && !oSRS.IsProjected() && !bSwitchedXY )
+        if( bCanCancelGT && !m_oSRS.IsGeographic() && !m_oSRS.IsProjected() && !bSwitchedXY )
         {
             bGotCfGT = false;
         }
@@ -4995,21 +5002,22 @@ double *netCDFDataset::Get1DGeolocation( CPL_UNUSED const char *szDimName,
 }
 
 /************************************************************************/
-/*                        SetProjectionNoUpdate()                       */
+/*                        SetSpatialRefNoUpdate()                       */
 /************************************************************************/
 
-void netCDFDataset::SetProjectionNoUpdate( const char * pszNewProjection )
+void netCDFDataset::SetSpatialRefNoUpdate( const OGRSpatialReference* poSRS )
 {
-    CPLFree(m_pszProjection);
-    m_pszProjection = CPLStrdup(pszNewProjection);
+    m_oSRS.Clear();
+    if( poSRS )
+        m_oSRS = *poSRS;
     m_bHasProjection = true;
 }
 
 /************************************************************************/
-/*                          _SetProjection()                            */
+/*                          SetSpatialRef()                             */
 /************************************************************************/
 
-CPLErr netCDFDataset::_SetProjection( const char * pszNewProjection )
+CPLErr netCDFDataset::SetSpatialRef( const OGRSpatialReference* poSRS )
 {
     CPLMutexHolderD(&hNCMutex);
 
@@ -5017,30 +5025,13 @@ CPLErr netCDFDataset::_SetProjection( const char * pszNewProjection )
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                   "netCDFDataset::_SetProjection() should only be called once "
-                  "in update mode!\npszNewProjection=\n%s",
-                  pszNewProjection);
-        return CE_Failure;
-    }
-
-    CPLDebug("GDAL_netCDF", "SetProjection, WKT = %s", pszNewProjection);
-
-    if( !STARTS_WITH_CI(pszNewProjection, "GEOGCS")
-        && !STARTS_WITH_CI(pszNewProjection, "PROJCS")
-        && !STARTS_WITH_CI(pszNewProjection, "GEOGCRS")
-        && !EQUAL(pszNewProjection, "") )
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                  "Only OGC WKT GEOGCS and PROJCS Projections supported "
-                  "for writing to NetCDF.  "
-                  "%s not supported.",
-                  pszNewProjection);
-
+                  "in update mode!");
         return CE_Failure;
     }
 
     if( m_bHasGeoTransform )
     {
-        SetProjectionNoUpdate(pszNewProjection);
+        SetSpatialRefNoUpdate(poSRS);
 
         // For NC4/NC4C, writing both projection variables and data,
         // followed by redefining nodata value, cancels the projection
@@ -5050,7 +5041,7 @@ CPLErr netCDFDataset::_SetProjection( const char * pszNewProjection )
         return AddProjectionVars(true, nullptr, nullptr);
     }
 
-    SetProjectionNoUpdate(pszNewProjection);
+    SetSpatialRefNoUpdate(poSRS);
 
     return CE_None;
 }
@@ -5589,11 +5580,9 @@ CPLErr netCDFDataset::AddProjectionVars( bool bDefsOnly,
     GDALDatasetH hDS_Y = nullptr;
     GDALRasterBandH hBand_Y = nullptr;
 
-    OGRSpatialReference oSRS;
-    if( m_pszProjection )
+    OGRSpatialReference oSRS(m_oSRS);
+    if( !m_oSRS.IsEmpty() )
     {
-        oSRS.importFromWkt(m_pszProjection);
-
         if( oSRS.IsProjected() )
             bIsProjected = true;
         else if( oSRS.IsGeographic() )
@@ -5602,11 +5591,14 @@ CPLErr netCDFDataset::AddProjectionVars( bool bDefsOnly,
 
     if( bDefsOnly )
     {
+        char* pszProjection = nullptr;
+        m_oSRS.exportToWkt(&pszProjection);
         CPLDebug("GDAL_netCDF",
                 "SetProjection, WKT now = [%s]\nprojected: %d geographic: %d",
-                m_pszProjection,
+                pszProjection ? pszProjection : "(null)",
                 static_cast<int>(bIsProjected),
                 static_cast<int>(bIsGeographic));
+        CPLFree(pszProjection);
 
         if( !m_bHasGeoTransform )
             CPLDebug("GDAL_netCDF", "netCDFDataset::AddProjectionVars() called, "
@@ -6046,10 +6038,6 @@ CPLErr netCDFDataset::AddProjectionVars( bool bDefsOnly,
             OGRSpatialReference *poLatLonSRS = nullptr;
             OGRCoordinateTransformation *poTransform = nullptr;
 
-            OGRSpatialReference oSRS2;
-            oSRS2.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            oSRS2.importFromWkt(m_pszProjection);
-
             size_t startX[1];
             size_t countX[1];
             size_t startY[1];
@@ -6114,12 +6102,12 @@ CPLErr netCDFDataset::AddProjectionVars( bool bDefsOnly,
             // Get OGR transform if GEOLOCATION is not available.
             if( bWriteLonLat && !bHasGeoloc )
             {
-                poLatLonSRS = oSRS2.CloneGeogCS();
+                poLatLonSRS = m_oSRS.CloneGeogCS();
                 if( poLatLonSRS != nullptr )
                 {
                     poLatLonSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
                     poTransform =
-                        OGRCreateCoordinateTransformation(&oSRS2, poLatLonSRS);
+                        OGRCreateCoordinateTransformation(&m_oSRS, poLatLonSRS);
                 }
                 // If no OGR transform, then don't write CF lon/lat.
                 if( poTransform == nullptr )
@@ -8507,7 +8495,9 @@ GDALDataset *netCDFDataset::Open( GDALOpenInfo *poOpenInfo )
                  EQUAL(papszName[1], "http") ||
                  EQUAL(papszName[1], "https") ||
                  EQUAL(papszName[1], "/vsicurl/http") ||
-                 EQUAL(papszName[1], "/vsicurl/https")) )
+                 EQUAL(papszName[1], "/vsicurl/https") ||
+                 EQUAL(papszName[1], "/vsicurl_streaming/http") ||
+                 EQUAL(papszName[1], "/vsicurl_streaming/https")) )
         {
             const int nCountBefore = CSLCount(papszName);
             CPLString osTmp = papszName[1];
@@ -10043,17 +10033,7 @@ netCDFDataset::CreateCopy( const char *pszFilename, GDALDataset *poSrcDS,
         else
             szLongName[0] = '\0';
 
-        bool bSignedData = true;
-        if( eDT == GDT_Byte )
-        {
-            // GDAL defaults to unsigned bytes, but check if metadata says its
-            // signed, as NetCDF can support this for certain formats.
-            bSignedData = false;
-            tmpMetadata =
-                poSrcBand->GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE");
-            if( tmpMetadata && EQUAL(tmpMetadata, "SIGNEDBYTE") )
-                bSignedData = true;
-        }
+        constexpr bool bSignedData = false;
 
         if( nDim > 2 )
             poBand = new netCDFRasterBand(
@@ -10115,6 +10095,12 @@ netCDFDataset::CreateCopy( const char *pszFilename, GDALDataset *poSrcDS,
         {
             CPLDebug("GDAL_netCDF", "GByte Band#%d", iBand);
             eErr = NCDFCopyBand<GByte>(poSrcBand, poDstBand, nXSize, nYSize,
+                                       GDALScaledProgress, pScaledProgress);
+        }
+        else if( eDT == GDT_Int8 )
+        {
+            CPLDebug("GDAL_netCDF", "GInt8 Band#%d", iBand);
+            eErr = NCDFCopyBand<GInt8>(poSrcBand, poDstBand, nXSize, nYSize,
                                        GDALScaledProgress, pScaledProgress);
         }
         else if( eDT == GDT_UInt16 )
@@ -10475,9 +10461,9 @@ void GDALRegister_netCDF()
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "nc");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
 #ifdef NETCDF_HAS_NC4
-                              "Byte UInt16 Int16 UInt32 Int32 Int64 UInt64 "
+                              "Byte Int8 UInt16 Int16 UInt32 Int32 Int64 UInt64 "
 #else
-                              "Byte Int16 Int32 "
+                              "Byte Int8 Int16 Int32 "
 #endif
                               "Float32 Float64 "
                               "CInt16 CInt32 CFloat32 CFloat64" );
@@ -10513,7 +10499,7 @@ void GDALRegister_netCDF()
 "     <Value>float</Value>"
 "     <Value>double</Value>"
 "   </Option>"
-"   <Option name='PIXELTYPE' type='string-select' scope='raster' description='only used in Create()'>"
+"   <Option name='PIXELTYPE' type='string-select' scope='raster' description='(deprecated, use Int8 datatype) only used in Create()'>"
 "       <Value>DEFAULT</Value>"
 "       <Value>SIGNEDBYTE</Value>"
 "   </Option>"
@@ -10654,6 +10640,13 @@ void GDALRegister_netCDF()
 "   </Option>"
 "</MultiDimArrayCreationOptionList>" );
 
+    poDriver->SetMetadataItem(GDAL_DMD_MULTIDIM_ARRAY_OPENOPTIONLIST,
+"<MultiDimArrayOpenOptionList>"
+"   <Option name='USE_DEFAULT_FILL_AS_NODATA' type='boolean' "
+    "description='Whether the default fill value should be used as nodata "
+    "when there is no _FillValue or missing_value attribute' default='NO'/>"
+"</MultiDimArrayOpenOptionList>" );
+
     poDriver->SetMetadataItem(GDAL_DMD_MULTIDIM_ATTRIBUTE_CREATIONOPTIONLIST,
 "<MultiDimAttributeCreationOptionList>"
 "   <Option name='NC_TYPE' type='string-select' default='netCDF data type'>"
@@ -10668,6 +10661,8 @@ void GDALRegister_netCDF()
 
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATATYPES,
                               "Integer Integer64 Real String Date DateTime");
+
+    poDriver->SetMetadataItem( GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE" );
 
     // Set pfns and register driver.
     poDriver->pfnOpen = netCDFDataset::Open;
@@ -11077,12 +11072,11 @@ static CPLErr NCDFSafeStrcat(char **ppszDest, const char *pszSrc,
 }
 
 /* helper function for NCDFGetAttr() */
-/* sets pdfValue to first value returned */
-/* and if bSetPszValue=True sets pszValue with all attribute values */
-/* pszValue is the responsibility of the caller and must be freed */
+/* if pdfValue != nullptr, sets *pdfValue to first value returned */
+/* if ppszValue != nullptr, sets *ppszValue with all attribute values */
+/* *ppszValue is the responsibility of the caller and must be freed */
 static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
-                            double *pdfValue, char **pszValue,
-                            bool bSetPszValue )
+                            double *pdfValue, char **ppszValue )
 {
     nc_type nAttrType = NC_NAT;
     size_t nAttrLen = 0;
@@ -11118,6 +11112,7 @@ static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
     double dfValue = 0.0;
     size_t m;
     char szTemp[256];
+    bool bSetDoubleFromStr = false;
 
     switch( nAttrType )
     {
@@ -11125,6 +11120,7 @@ static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
         CPL_IGNORE_RET_VAL(
             nc_get_att_text(nCdfId, nVarId, pszAttrName, pszAttrValue));
         pszAttrValue[nAttrLen] = '\0';
+        bSetDoubleFromStr = true;
         dfValue = 0.0;
         break;
     case NC_BYTE:
@@ -11212,6 +11208,7 @@ static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
         char **ppszTemp =
             static_cast<char **>(CPLCalloc(nAttrLen, sizeof(char *)));
         nc_get_att_string(nCdfId, nVarId, pszAttrName, ppszTemp);
+        bSetDoubleFromStr = true;
         dfValue = 0.0;
         for( m = 0; m < nAttrLen - 1; m++ )
         {
@@ -11315,9 +11312,25 @@ static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
     if( nAttrLen > 1 && nAttrType!= NC_CHAR )
         NCDFSafeStrcat(&pszAttrValue, "}", &nAttrValueSize);
 
+    if( bSetDoubleFromStr )
+    {
+        if( CPLGetValueType(pszAttrValue) == CPL_VALUE_STRING )
+        {
+            if( ppszValue == nullptr && pdfValue != nullptr )
+            {
+                CPLFree(pszAttrValue);
+                return CE_Failure;
+            }
+        }
+        dfValue = CPLAtof(pszAttrValue);
+    }
+
     /* set return values */
-    if( bSetPszValue ) *pszValue = pszAttrValue;
-    else CPLFree(pszAttrValue);
+    if( ppszValue )
+        *ppszValue = pszAttrValue;
+    else
+        CPLFree(pszAttrValue);
+
     if( pdfValue ) *pdfValue = dfValue;
 
     return CE_None;
@@ -11327,14 +11340,14 @@ static CPLErr NCDFGetAttr1( int nCdfId, int nVarId, const char *pszAttrName,
 CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
                     double *pdfValue )
 {
-    return NCDFGetAttr1(nCdfId, nVarId, pszAttrName, pdfValue, nullptr, false);
+    return NCDFGetAttr1(nCdfId, nVarId, pszAttrName, pdfValue, nullptr);
 }
 
 /* pszValue is the responsibility of the caller and must be freed */
 CPLErr NCDFGetAttr( int nCdfId, int nVarId, const char *pszAttrName,
                     char **pszValue )
 {
-    return NCDFGetAttr1(nCdfId, nVarId, pszAttrName, nullptr, pszValue, true);
+    return NCDFGetAttr1(nCdfId, nVarId, pszAttrName, nullptr, pszValue);
 }
 
 /* By default write NC_CHAR, but detect for int/float/double and */
@@ -12098,7 +12111,7 @@ double NCDFGetDefaultNoDataValue( int nCdfId, int nVarId, int nVarType, bool& bG
 /*                      NCDFGetDefaultNoDataValueAsInt64()              */
 /************************************************************************/
 
-static int64_t NCDFGetDefaultNoDataValueAsInt64( int nCdfId, int nVarId, bool& bGotNoData )
+int64_t NCDFGetDefaultNoDataValueAsInt64( int nCdfId, int nVarId, bool& bGotNoData )
 
 {
     int nNoFill = 0;
@@ -12120,7 +12133,7 @@ static int64_t NCDFGetDefaultNoDataValueAsInt64( int nCdfId, int nVarId, bool& b
 /*                     NCDFGetDefaultNoDataValueAsUInt64()              */
 /************************************************************************/
 
-static uint64_t NCDFGetDefaultNoDataValueAsUInt64( int nCdfId, int nVarId, bool& bGotNoData )
+uint64_t NCDFGetDefaultNoDataValueAsUInt64( int nCdfId, int nVarId, bool& bGotNoData )
 
 {
     int nNoFill = 0;
@@ -13166,17 +13179,9 @@ CPLErr netCDFDataset::CreateGrpVectorLayers( int nCdfId,
     papszMetadata = papszMetadataBackup;
 
     OGRSpatialReference *poSRS = nullptr;
-    if( m_pszProjection[0] )
+    if( !m_oSRS.IsEmpty() )
     {
-        poSRS = new OGRSpatialReference();
-        poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        if( poSRS->importFromWkt(m_pszProjection) != OGRERR_NONE )
-        {
-            delete poSRS;
-            poSRS = nullptr;
-        }
-        CPLFree(m_pszProjection);
-        m_pszProjection = CPLStrdup("");
+        poSRS = m_oSRS.Clone();
     }
     // Reset if there's a 2D raster
     m_bHasProjection = false;

@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cfloat>
+#include <limits>
 #include <vector>
 #include <algorithm>
 
@@ -183,6 +184,9 @@ void gvBurnScanline( void *pCBData, int nY, int nXStart, int nXEnd,
         case GDT_Byte:
             gvBurnScanlineBasic<GByte>( psInfo, nY, nXStart, nXEnd, dfVariant );
             break;
+        case GDT_Int8:
+            gvBurnScanlineBasic<GInt8>( psInfo, nY, nXStart, nXEnd, dfVariant );
+            break;
         case GDT_Int16:
             gvBurnScanlineBasic<GInt16>( psInfo, nY, nXStart, nXEnd, dfVariant );
             break;
@@ -207,7 +211,12 @@ void gvBurnScanline( void *pCBData, int nY, int nXStart, int nXEnd,
         case GDT_Float64:
             gvBurnScanlineBasic<double>( psInfo, nY, nXStart, nXEnd, dfVariant );
             break;
-        default:
+        case GDT_CInt16:
+        case GDT_CInt32:
+        case GDT_CFloat32:
+        case GDT_CFloat64:
+        case GDT_Unknown:
+        case GDT_TypeCount:
             CPLAssert(false);
             break;
     }
@@ -289,6 +298,9 @@ void gvBurnPoint( void *pCBData, int nY, int nX, double dfVariant )
         case GDT_Byte:
             gvBurnPointBasic<GByte>( psInfo, nY, nX, dfVariant );
             break;
+        case GDT_Int8:
+            gvBurnPointBasic<GInt8>( psInfo, nY, nX, dfVariant );
+            break;
         case GDT_Int16:
             gvBurnPointBasic<GInt16>( psInfo, nY, nX, dfVariant );
             break;
@@ -313,7 +325,12 @@ void gvBurnPoint( void *pCBData, int nY, int nX, double dfVariant )
         case GDT_Float64:
             gvBurnPointBasic<double>( psInfo, nY, nX, dfVariant );
             break;
-        default:
+        case GDT_CInt16:
+        case GDT_CInt32:
+        case GDT_CFloat32:
+        case GDT_CFloat64:
+        case GDT_Unknown:
+        case GDT_TypeCount:
             CPLAssert(false);
     }
 }
@@ -609,7 +626,8 @@ gv_rasterize_one_shape( unsigned char *pabyChunkBuf, int nXOff, int nYOff,
                                           (eBurnValueSrc == GBV_UserBurnValue)?
                                           nullptr : aPointVariant.data(),
                                           gvBurnPoint, &sInfo,
-                                          eMergeAlg == GRMA_Add );
+                                          eMergeAlg == GRMA_Add,
+                                          false);
           else
               GDALdllImageLine( sInfo.nXSize, nYSize,
                                 static_cast<int>(aPartSize.size()),
@@ -644,7 +662,8 @@ gv_rasterize_one_shape( unsigned char *pabyChunkBuf, int nXOff, int nYOff,
                       aPointX.data(), aPointY.data(),
                       nullptr,
                       gvBurnPoint, &sInfo,
-                      eMergeAlg == GRMA_Add );
+                      eMergeAlg == GRMA_Add,
+                      true );
               }
               else
               {
@@ -662,7 +681,8 @@ gv_rasterize_one_shape( unsigned char *pabyChunkBuf, int nXOff, int nYOff,
                       aPointX.data(), aPointY.data(),
                       aPointVariant.data(),
                       gvBurnPoint, &sInfo,
-                      eMergeAlg == GRMA_Add );
+                      eMergeAlg == GRMA_Add,
+                      true );
               }
           }
       }
@@ -952,7 +972,6 @@ CPLErr GDALRasterizeGeometriesInternal( GDALDatasetH hDS,
         pfnProgress = GDALDummyProgress;
 
     GDALDataset *poDS = GDALDataset::FromHandle(hDS);
-
 /* -------------------------------------------------------------------- */
 /*      Do some rudimentary arg checking.                               */
 /* -------------------------------------------------------------------- */
@@ -996,6 +1015,7 @@ CPLErr GDALRasterizeGeometriesInternal( GDALDatasetH hDS,
     {
         return CE_Failure;
     }
+
 
 /* -------------------------------------------------------------------- */
 /*      If we have no transformer, assume the geometries are in file    */
@@ -1627,7 +1647,8 @@ CPLErr GDALRasterizeLayers( GDALDatasetH hDS,
                 gv_rasterize_one_shape( pabyChunkBuf, 0, iY,
                                         poDS->GetRasterXSize(),
                                         nThisYChunkSize,
-                                        nBandCount, eType, 0, 0, 0, bAllTouched, poGeom,
+                                        nBandCount, eType, 0, 0, 0,
+                                        bAllTouched, poGeom,
                                         GDT_Float64,
                                         padfBurnValues,
                                         nullptr,
@@ -1932,7 +1953,8 @@ CPLErr GDALRasterizeLayersBuf( void *pData, int nBufXSize, int nBufYSize,
             gv_rasterize_one_shape( static_cast<unsigned char *>(pData), 0, 0,
                                     nBufXSize, nBufYSize,
                                     1, eBufType,
-                                    nPixelSpace, nLineSpace, 0, bAllTouched, poGeom,
+                                    nPixelSpace, nLineSpace, 0,
+                                    bAllTouched, poGeom,
                                     GDT_Float64,
                                     &dfBurnValue,
                                     nullptr,

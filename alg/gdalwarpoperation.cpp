@@ -45,6 +45,7 @@
 #include "cpl_config.h"
 #include "cpl_conv.h"
 #include "cpl_error.h"
+#include "cpl_mask.h"
 #include "cpl_multiproc.h"
 #include "cpl_string.h"
 #include "cpl_vsi.h"
@@ -1174,7 +1175,7 @@ CPLErr GDALWarpOperation::ChunkAndWarpMulti(
             }
             asThreadData[iThread].bIOMutexTaken = FALSE;
 
-            CPLDebug( "GDAL", "Start chunk %d.", iChunk );
+            CPLDebug( "GDAL", "Start chunk %d / %d.", iChunk, nChunkListCount );
             asThreadData[iThread].hThreadHandle = CPLCreateJoinableThread(
                 ChunkThreadMain,
                 const_cast<ChunkThreadData *>(&asThreadData[iThread]));
@@ -1210,7 +1211,7 @@ CPLErr GDALWarpOperation::ChunkAndWarpMulti(
             CPLJoinThread(asThreadData[iThread].hThreadHandle);
             asThreadData[iThread].hThreadHandle = nullptr;
 
-            CPLDebug( "GDAL", "Finished chunk %d.", iChunk-1 );
+            CPLDebug( "GDAL", "Finished chunk %d / %d.", iChunk-1, nChunkListCount );
 
             eErr = asThreadData[iThread].eErr;
 
@@ -2107,23 +2108,17 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
             if( !bAtLeastOneBandAllValid &&
                 (pszUnifiedSrcNoData == nullptr || CPLTestBool(pszUnifiedSrcNoData)) )
             {
-                const GPtrDiff_t nBytesInMask = (
-                    static_cast<GPtrDiff_t>(oWK.nSrcXSize) * oWK.nSrcYSize + 31) / 8;
-                const GPtrDiff_t nIters = nBytesInMask / 4;
+                auto nMaskBits = static_cast<GPtrDiff_t>(oWK.nSrcXSize) * oWK.nSrcYSize;
 
                 eErr = CreateKernelMask( &oWK, 0 /* not used */, "UnifiedSrcValid" );
 
                 if( eErr == CE_None )
                 {
-                    memset( oWK.panUnifiedSrcValid, 0, nBytesInMask );
+                    CPLMaskClearAll(oWK.panUnifiedSrcValid, nMaskBits);
 
                     for( int k = 0; k < psOptions->nBandCount; k++ )
                     {
-                        for( GPtrDiff_t iWord = 0; iWord < nIters; iWord++ )
-                        {
-                            oWK.panUnifiedSrcValid[iWord] |=
-                                oWK.papanBandSrcValid[k][iWord];
-                        }
+                        CPLMaskMerge(oWK.panUnifiedSrcValid, oWK.papanBandSrcValid[k], nMaskBits);
                     }
 
                     // If UNIFIED_SRC_NODATA is set, then we will ignore the individual
@@ -2193,19 +2188,19 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
     {
         CPLAssert( oWK.panDstValid == nullptr );
 
-        const GPtrDiff_t nMaskWords = (static_cast<GPtrDiff_t>(oWK.nDstXSize) * oWK.nDstYSize + 31)/32;
+        const GPtrDiff_t nMaskBits = static_cast<GPtrDiff_t>(oWK.nDstXSize) * oWK.nDstYSize;
 
         eErr = CreateKernelMask( &oWK, 0 /* not used */, "DstValid" );
         GUInt32 *panBandMask =
             eErr == CE_None
-            ? static_cast<GUInt32 *>(CPLMalloc(nMaskWords * 4))
+            ? CPLMaskCreate(nMaskBits, true)
             : nullptr;
 
         if( eErr == CE_None && panBandMask != nullptr )
         {
             for( int iBand = 0; iBand < psOptions->nBandCount; iBand++ )
             {
-                memset( panBandMask, 0xff, nMaskWords * 4 );
+                CPLMaskSetAll(panBandMask, nMaskBits);
 
                 double adfNoData[2] =
                 {
@@ -2237,8 +2232,7 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
                     break;
                 }
 
-                for( GPtrDiff_t iWord = nMaskWords - 1; iWord >= 0; iWord-- )
-                    oWK.panDstValid[iWord] |= panBandMask[iWord];
+                CPLMaskMerge(oWK.panDstValid, panBandMask, nMaskBits);
             }
             CPLFree( panBandMask );
         }

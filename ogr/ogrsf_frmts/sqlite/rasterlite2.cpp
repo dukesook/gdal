@@ -100,7 +100,7 @@ bool OGRSQLiteDataSource::OpenRaster()
         const char* pszAbstract = papszRow[2];
         if( pszCoverageName != nullptr )
         {
-            rl2CoveragePtr cvg = rl2_create_coverage_from_dbms( 
+            rl2CoveragePtr cvg = rl2_create_coverage_from_dbms(
                                                             hDB,
                                                             nullptr,
                                                             pszCoverageName );
@@ -356,18 +356,8 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         OGRSpatialReference* poSRS = FetchSRS( nSRID );
         if( poSRS != nullptr )
         {
-            OGRSpatialReference oSRS(*poSRS);
-            char* pszWKT = nullptr;
-            if( oSRS.EPSGTreatsAsLatLong() ||
-                oSRS.EPSGTreatsAsNorthingEasting() )
-            {
-                oSRS.GetRoot()->StripNodes( "AXIS" );
-            }
-            if( oSRS.exportToWkt( &pszWKT ) == OGRERR_NONE )
-            {
-                m_osProjection = pszWKT;
-            }
-            CPLFree(pszWKT);
+            m_oSRS = *poSRS;
+            m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
         }
     }
 
@@ -381,7 +371,6 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         return false;
     int nBits = 0;
     GDALDataType eDT = GDT_Unknown;
-    bool bSigned = false;
     switch( nSampleType )
     {
         default:
@@ -416,57 +405,49 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         case RL2_SAMPLE_INT8:
         {
             nBits = 8;
-            eDT = GDT_Byte;
-            bSigned = true;
+            eDT = GDT_Int8;
             break;
         }
         case RL2_SAMPLE_UINT8:
         {
             nBits = 8;
             eDT = GDT_Byte;
-            bSigned = false;
             break;
         }
         case RL2_SAMPLE_INT16:
         {
             nBits = 16;
             eDT = GDT_Int16;
-            bSigned = true;
             break;
         }
         case RL2_SAMPLE_UINT16:
         {
             nBits = 16;
             eDT = GDT_UInt16;
-            bSigned = false;
             break;
         }
         case RL2_SAMPLE_INT32:
         {
             nBits = 32;
             eDT = GDT_Int32;
-            bSigned = true;
             break;
         }
         case RL2_SAMPLE_UINT32:
         {
             nBits = 32;
             eDT = GDT_UInt32;
-            bSigned = false;
             break;
         }
         case RL2_SAMPLE_FLOAT:
         {
             nBits = 32;
             eDT = GDT_Float32;
-            bSigned = true;
             break;
         }
         case RL2_SAMPLE_DOUBLE:
         {
             nBits = 64;
             eDT = GDT_Float64;
-            bSigned = true;
             break;
         }
     }
@@ -683,7 +664,6 @@ bool OGRSQLiteDataSource::OpenRasterSubDataset(CPL_UNUSED
         SetBand( iBand,
                  new RL2RasterBand( iBand, nPixelType,
                                     eDT, nBits, m_bPromote1BitAs8Bit,
-                                    bSigned,
                                     nBlockXSize, nBlockYSize,
                                     bHasNoData,
                                     dfNoDataValue ) );
@@ -958,7 +938,6 @@ RL2RasterBand::RL2RasterBand( int nBandIn,
                               GDALDataType eDT,
                               int nBits,
                               bool bPromote1BitAs8Bit,
-                              bool bSigned,
                               int nBlockXSizeIn,
                               int nBlockYSizeIn,
                               bool bHasNoDataIn,
@@ -976,12 +955,6 @@ RL2RasterBand::RL2RasterBand( int nBandIn,
         GDALRasterBand::SetMetadataItem( (nBits == 1 && bPromote1BitAs8Bit) ?
                                                     "SOURCE_NBITS" : "NBITS",
                                          CPLSPrintf("%d", nBits),
-                                         "IMAGE_STRUCTURE" );
-    }
-    if( nBits == 8 && bSigned )
-    {
-        GDALRasterBand::SetMetadataItem( "PIXELTYPE",
-                                         "SIGNEDBYTE",
                                          "IMAGE_STRUCTURE" );
     }
 
@@ -1013,10 +986,6 @@ RL2RasterBand::RL2RasterBand(const RL2RasterBand* poOther)
     GDALRasterBand::SetMetadataItem( "NBITS",
         const_cast<RL2RasterBand*>(poOther)->
                     GetMetadataItem("NBITS", "IMAGE_STRUCTURE"),
-        "IMAGE_STRUCTURE" );
-    GDALRasterBand::SetMetadataItem( "PIXELTYPE",
-        const_cast<RL2RasterBand*>(poOther)->
-                    GetMetadataItem("PIXELTYPE", "IMAGE_STRUCTURE"),
         "IMAGE_STRUCTURE" );
     m_eColorInterp = poOther->m_eColorInterp;
     m_bHasNoData = poOther->m_bHasNoData;
@@ -1735,7 +1704,9 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
     }
 
     // Guess sample type in other cases
-    if( eDT == GDT_UInt16 )
+    if( eDT == GDT_Int8 )
+        nSampleType = RL2_SAMPLE_INT8;
+    else if( eDT == GDT_UInt16 )
         nSampleType = RL2_SAMPLE_UINT16;
     else if( eDT == GDT_Int16 )
         nSampleType = RL2_SAMPLE_INT16;
@@ -2319,9 +2290,10 @@ GDALDataset *OGRSQLiteDriverCreateCopy( const char* pszName,
 
 CPLErr OGRSQLiteDataSource::IBuildOverviews(
     const char * pszResampling,
-    int nOverviews, int * panOverviewList,
-    int nBandsIn, int * /*panBandList */,
-    GDALProgressFunc /*pfnProgress*/, void * /*pProgressData*/ )
+    int nOverviews, const int * panOverviewList,
+    int nBandsIn, const int * /*panBandList */,
+    GDALProgressFunc /*pfnProgress*/, void * /*pProgressData*/,
+    CSLConstList /* papszOptions */)
 
 {
     if( nBandsIn != nBands )
@@ -2442,12 +2414,12 @@ CPLErr OGRSQLiteDataSource::GetGeoTransform( double* padfGeoTransform )
 }
 
 /************************************************************************/
-/*                           GetProjectionRef()                         */
+/*                            GetSpatialRef()                           */
 /************************************************************************/
 
-const char* OGRSQLiteDataSource::_GetProjectionRef()
+const OGRSpatialReference* OGRSQLiteDataSource::GetSpatialRef() const
 {
-    if( !m_osProjection.empty() )
-        return m_osProjection.c_str();
-    return GDALPamDataset::_GetProjectionRef();
+    if( !m_oSRS.IsEmpty() )
+        return &m_oSRS;
+    return GDALPamDataset::GetSpatialRef();
 }

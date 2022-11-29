@@ -171,7 +171,10 @@ Type GDALCachedPixelAccessor<Type, TILE_SIZE, CACHED_TILE_COUNT>::GetSlowPath(
             cachedTile.m_nTileY == nTileY )
         {
             const auto ret = cachedTile.m_data[nYInTile * TILE_SIZE + nXInTile];
-            std::swap(m_aCachedTiles[0], m_aCachedTiles[i]);
+            CachedTile tmp = std::move(m_aCachedTiles[i]);
+            for( int j = i; j >= 1; --j )
+                m_aCachedTiles[j] = std::move(m_aCachedTiles[j-1]);
+            m_aCachedTiles[0] = std::move(tmp);
             if( pbSuccess )
                 *pbSuccess = true;
             return ret;
@@ -243,7 +246,12 @@ bool GDALCachedPixelAccessor<Type, TILE_SIZE, CACHED_TILE_COUNT>::SetSlowPath(
             cachedTile.m_data[nYInTile * TILE_SIZE + nXInTile] = val;
             cachedTile.m_bModified = true;
             if( i > 0 )
-                std::swap(m_aCachedTiles[0], m_aCachedTiles[i]);
+            {
+                CachedTile tmp = std::move(m_aCachedTiles[i]);
+                for( int j = i; j >= 1; --j )
+                    m_aCachedTiles[j] = std::move(m_aCachedTiles[j-1]);
+                m_aCachedTiles[0] = std::move(tmp);
+            }
             return true;
         }
     }
@@ -301,6 +309,7 @@ void GDALCachedPixelAccessor<Type, TILE_SIZE, CACHED_TILE_COUNT>::ResetModifiedF
 template<class T> struct GDALCachedPixelAccessorGetDataType {};
 
 template<> struct GDALCachedPixelAccessorGetDataType<GByte>   { static constexpr GDALDataType DataType = GDT_Byte; };
+template<> struct GDALCachedPixelAccessorGetDataType<GInt8>   { static constexpr GDALDataType DataType = GDT_Int8; };
 template<> struct GDALCachedPixelAccessorGetDataType<GUInt16> { static constexpr GDALDataType DataType = GDT_UInt16; };
 template<> struct GDALCachedPixelAccessorGetDataType<GInt16>  { static constexpr GDALDataType DataType = GDT_Int16; };
 template<> struct GDALCachedPixelAccessorGetDataType<GUInt32> { static constexpr GDALDataType DataType = GDT_UInt32; };
@@ -327,7 +336,10 @@ bool GDALCachedPixelAccessor<Type, TILE_SIZE, CACHED_TILE_COUNT>::LoadTile(int n
     {
         if( !FlushTile(CACHED_TILE_COUNT - 1) )
             return false;
-        std::swap(m_aCachedTiles[0], m_aCachedTiles[CACHED_TILE_COUNT - 1]);
+        CachedTile tmp = std::move(m_aCachedTiles[CACHED_TILE_COUNT-1]);
+        for( int i = CACHED_TILE_COUNT - 1; i >= 1; --i )
+            m_aCachedTiles[i] = std::move(m_aCachedTiles[i-1]);
+        m_aCachedTiles[0] = std::move(tmp);
     }
     else
     {
@@ -337,6 +349,11 @@ bool GDALCachedPixelAccessor<Type, TILE_SIZE, CACHED_TILE_COUNT>::LoadTile(int n
         m_nCachedTileCount ++;
     }
 
+#if 0
+    CPLDebug("GDAL", "Load tile(%d, %d) of band %d of dataset %s",
+              nTileX, nTileY, m_poBand->GetBand(),
+              m_poBand->GetDataset() ? m_poBand->GetDataset()->GetDescription() : "(unknown)");
+#endif
     CPLAssert(!m_aCachedTiles[0].m_bModified);
     const int nXOff = nTileX * TILE_SIZE;
     const int nYOff = nTileY * TILE_SIZE;

@@ -16,6 +16,8 @@ template = """<html>
 def gather_redirects(src_dir):
     output = {}
 
+    output.update({"python/index.html": "../api/python/osgeo.html"})
+
     def fetch(path, d, prefix):
         files = os.listdir(os.path.join(src_dir, path))
         for f in files:
@@ -170,6 +172,10 @@ def gather_redirects(src_dir):
         output.update(
             {utility + ".html": os.path.join("./programs/", utility) + ".html"}
         )
+
+    output.update(
+        {"build_hints.html": os.path.join("./development/building_from_source.html")}
+    )
 
     return output
 

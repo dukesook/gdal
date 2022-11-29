@@ -328,17 +328,7 @@ public:
     // Stub for delete, GDAL should only overwrite the XML
     static CPLErr Delete(const char *) { return CE_None; }
 
-    virtual const char *_GetProjectionRef() override { return projection; }
-    virtual CPLErr _SetProjection(const char *proj) override {
-        projection = proj;
-        return CE_None;
-    }
-    const OGRSpatialReference* GetSpatialRef() const override {
-        return GetSpatialRefFromOldGetProjectionRef();
-    }
-    CPLErr SetSpatialRef(const OGRSpatialReference* poSRS) override {
-        return OldSetProjectionFromSetSpatialRef(poSRS);
-    }
+    const OGRSpatialReference* GetSpatialRef() const override { return m_oSRS.IsEmpty() ? nullptr: &m_oSRS; }
 
     virtual CPLString const &GetPhotometricInterpretation() { return photometric; }
     virtual CPLErr SetPhotometricInterpretation(const char *photo) {
@@ -410,8 +400,11 @@ protected:
         void *, int, int, GDALDataType,
         int, int *, GSpacing, GSpacing, GSpacing, GDALRasterIOExtraArg*) override;
 
-    virtual CPLErr IBuildOverviews(const char*, int, int*, int, int*,
-        GDALProgressFunc, void*) override;
+    virtual CPLErr IBuildOverviews(const char*,
+                                   int, const int*,
+                                   int, const int*,
+                                   GDALProgressFunc, void*,
+                                   CSLConstList papszOptions) override;
 
     virtual int CloseDependentDatasets() override;
 
@@ -496,8 +489,8 @@ protected:
     double GeoTransform[6];
     int bGeoTransformValid;
 
-    // Projection string, WKT
-    CPLString projection;
+    // CRS
+    OGRSpatialReference m_oSRS{};
 
     // Photometric interpretation
     CPLString photometric;
@@ -676,7 +669,6 @@ public:
     static bool IsJPEG(const buf_mgr& src);
 
 #if defined(JPEG12_SUPPORTED) // Internal only
-#define LIBJPEG_12_H "../jpeg/libjpeg12/jpeglib.h"
     CPLErr CompressJPEG12(buf_mgr &dst, buf_mgr &src);
     CPLErr DecompressJPEG12(buf_mgr &dst, buf_mgr &src);
 #endif

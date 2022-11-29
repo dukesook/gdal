@@ -431,6 +431,8 @@ Creation Options
 
 -  **PIXELTYPE=[DEFAULT/SIGNEDBYTE]**: By setting this to SIGNEDBYTE, a
    new Byte file can be forced to be written as signed byte.
+   Starting with GDAL 3.7, this option is deprecated and Int8 should rather
+   be used.
 
 -  **WRITE_GDAL_VERSION=[YES/NO]**: (GDAL >= 3.5.0)
    Define if a "GDAL" text global attribute should be added on file creation
@@ -574,6 +576,12 @@ The :cpp:func:`GDALGroup::GetMDArrayNames` method supports the following options
   single-dimensional variables whose ``standard_name`` attribute is "time"
   will not be listed.
 - GROUP_BY=SAME_DIMENSION. If set, single-dimensional variables will not be listed
+
+The :cpp:func:`GDALGroup::OpenMDArray` method supports the following options:
+
+- USE_DEFAULT_FILL_AS_NODATA=YES/NO. (GDAL >= 3.6) Defaults to NO. If set to YES, the default
+  fill value will be used as nodata when there is no _FillValue or missing_value
+  attribute (except on variables of type Byte, UByte, Char)
 
 The :cpp:func:`GDALGroup::CreateMDArray` method supports the following options:
 

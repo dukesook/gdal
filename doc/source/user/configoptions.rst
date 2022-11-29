@@ -117,7 +117,7 @@ the configuration file starts with a ``[directives]`` section that contains a
 .. code-block::
 
     [directives]
-    # ignore environent variables. Take only into account the content of the
+    # ignore environment variables. Take only into account the content of the
     # [configoptions] section, or ones defined programmatically with
     # CPLSetConfigOption / CPLSetThreadLocalConfigOption.
     ignore-env-variables=yes
@@ -125,7 +125,7 @@ the configuration file starts with a ``[directives]`` section that contains a
 
 Starting with GDAL 3.5, a configuration file can also contain credentials
 (or more generally options related to a virtual file system) for a given path prefix,
-that can also be set with :cpp:func:`VSISetCredential`. Credentials should be put under
+that can also be set with :cpp:func:`VSISetPathSpecificOption`. Credentials should be put under
 a ``[credentials]`` section, and for each path prefix, under a relative subsection
 whose name starts with "[." (e.g. "[.some_arbitrary_name]"), and whose first
 key is "path".

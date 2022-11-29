@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cwchar>
 #include <vector>
+#include <limits>
 
 #define DIV_ROUND_UP(a, b) ( ((a) % (b)) == 0 ? ((a) / (b)) : (((a) / (b)) + 1) )
 
@@ -175,14 +176,22 @@ inline bool WriteFloat64(VSILFILE* fp, double dfVal)
 /*                          WriteUInt32()                               */
 /************************************************************************/
 
-inline void WriteUInt32(std::vector<GByte>& abyBuffer, uint32_t nVal, size_t nPos = static_cast<size_t>(-1))
+inline void WriteUInt32(std::vector<GByte>& abyBuffer, uint32_t nVal)
 {
     CPL_LSBPTR32(&nVal);
     const GByte* pabyInput = reinterpret_cast<const GByte*>(&nVal);
-    if( nPos == static_cast<size_t>(-1) )
-        abyBuffer.insert(abyBuffer.end(), pabyInput, pabyInput + sizeof(nVal));
-    else
-        memcpy(&abyBuffer[nPos], pabyInput, sizeof(nVal));
+    abyBuffer.insert(abyBuffer.end(), pabyInput, pabyInput + sizeof(nVal));
+}
+
+/************************************************************************/
+/*                          WriteUInt32()                               */
+/************************************************************************/
+
+inline void WriteUInt32(std::vector<GByte>& abyBuffer, uint32_t nVal, size_t nPos)
+{
+    CPL_LSBPTR32(&nVal);
+    const GByte* pabyInput = reinterpret_cast<const GByte*>(&nVal);
+    memcpy(&abyBuffer[nPos], pabyInput, sizeof(nVal));
 }
 
 /************************************************************************/

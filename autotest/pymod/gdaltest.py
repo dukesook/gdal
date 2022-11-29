@@ -443,7 +443,6 @@ class GDALTest(object):
         if self.band > 0:
             minmax = src_ds.GetRasterBand(self.band).ComputeRasterMinMax()
 
-        src_prj = src_ds.GetProjection()
         src_gt = src_ds.GetGeoTransform()
 
         if new_filename is None:
@@ -565,11 +564,27 @@ class GDALTest(object):
                 print("new = ", new_gt)
                 pytest.fail("Geotransform differs.")
 
-        # Do we need to check the geotransform?
-        if check_srs is not None:
+        # Do we need to check the SRS?
+        if check_srs == True:
+            src_srs = src_ds.GetSpatialRef()
+            new_srs = new_ds.GetSpatialRef()
+            if src_srs is None and new_srs is not None:
+                pytest.fail("src_srs is None and new_srs is not None")
+            elif src_srs is not None and new_srs is None:
+                pytest.fail("src_srs is not None and new_srs is None")
+            elif (
+                src_srs is not None
+                and new_srs is not None
+                and not src_srs.IsSame(new_srs)
+            ):
+                print("")
+                print("old = %s" % src_srs.ExportToPrettyWkt())
+                print("new = %s" % new_srs.ExportToPrettyWkt())
+                pytest.fail("Projections differ")
+        elif check_srs is not None:
             new_prj = new_ds.GetProjection()
 
-            src_osr = osr.SpatialReference(wkt=src_prj)
+            src_osr = osr.SpatialReference(wkt=src_ds.GetProjection())
             new_osr = osr.SpatialReference(wkt=new_prj)
 
             if not src_osr.IsSame(new_osr):
@@ -866,17 +881,20 @@ class GDALTest(object):
         ysize = src_ds.RasterYSize
 
         new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        dt = src_ds.GetRasterBand(self.band).DataType
         new_ds = self.driver.Create(
             new_filename,
             xsize,
             ysize,
             1,
-            src_ds.GetRasterBand(self.band).DataType,
+            dt,
             options=self.options,
         )
         assert new_ds is not None, "Failed to create test file using Create method."
 
-        if self.options is None or "PIXELTYPE=SIGNEDBYTE" not in self.options:
+        if dt == gdal.GDT_Int8:
+            nodata = -11
+        elif self.options is None or "PIXELTYPE=SIGNEDBYTE" not in self.options:
             nodata = 130
         else:
             nodata = 11
@@ -1584,17 +1602,6 @@ def is_travis_branch(name):
 
 def is_ci():
     return "CI" in os.environ
-
-
-###############################################################################
-# Return True if we run under Github Workflow 'MacOS build'
-
-
-def is_github_workflow_mac():
-    return (
-        "GITHUB_WORKFLOW" in os.environ
-        and os.environ["GITHUB_WORKFLOW"] == "MacOS build"
-    )
 
 
 ###############################################################################

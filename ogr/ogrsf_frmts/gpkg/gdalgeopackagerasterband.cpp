@@ -35,7 +35,6 @@
 #include <algorithm>
 #include <limits>
 
-CPL_CVSID("$Id$")
 
 #if !defined(DEBUG_VERBOSE) && defined(DEBUG_VERBOSE_GPKG)
 #define DEBUG_VERBOSE
@@ -300,13 +299,22 @@ CPLErr GDALGPKGMBTilesLikeRasterBand::SetColorTable(GDALColorTable* poCT)
         return CE_Failure;
     }
 
+    AssignColorTable(poCT);
+    return CE_None;
+}
+
+/************************************************************************/
+/*                          AssignColorTable()                          */
+/************************************************************************/
+
+void GDALGPKGMBTilesLikeRasterBand::AssignColorTable(const GDALColorTable* poCT)
+{
     m_poTPD->m_bTriedEstablishingCT = true;
     delete m_poTPD->m_poCT;
     if( poCT != nullptr )
         m_poTPD->m_poCT = poCT->Clone();
     else
         m_poTPD->m_poCT = nullptr;
-    return CE_None;
 }
 
 /************************************************************************/
@@ -3372,8 +3380,38 @@ GDALRasterBand* GDALGeoPackageRasterBand::GetOverview(int nIdx)
 
 CPLErr GDALGeoPackageRasterBand::SetNoDataValue( double dfNoDataValue )
 {
+    GDALGeoPackageDataset *poGDS
+        = cpl::down_cast<GDALGeoPackageDataset *>( poDS );
+
     if( eDataType == GDT_Byte )
+    {
+        if( !(dfNoDataValue >= 0 && dfNoDataValue <= 255 &&
+              static_cast<int>(dfNoDataValue) == dfNoDataValue) )
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "Invalid nodata value for a Byte band: %.18g", dfNoDataValue);
+            return CE_Failure;
+        }
+
+        for( int i = 1; i <= poGDS->nBands; ++i )
+        {
+            if( i != nBand )
+            {
+                int bHasNoData = FALSE;
+                double dfOtherNoDataValue = poGDS->GetRasterBand(i)->GetNoDataValue(&bHasNoData);
+                if( bHasNoData && dfOtherNoDataValue != dfNoDataValue )
+                {
+                    CPLError(CE_Failure, CPLE_NotSupported,
+                             "Only the same nodata value can be set on all bands");
+                    return CE_Failure;
+                }
+            }
+        }
+
+        SetNoDataValueInternal(dfNoDataValue);
+        poGDS->m_bMetadataDirty = true;
         return CE_None;
+    }
 
     if( CPLIsNan(dfNoDataValue) )
     {
@@ -3384,8 +3422,6 @@ CPLErr GDALGeoPackageRasterBand::SetNoDataValue( double dfNoDataValue )
 
     SetNoDataValueInternal(dfNoDataValue);
 
-    GDALGeoPackageDataset *poGDS
-        = reinterpret_cast<GDALGeoPackageDataset *>( poDS );
     char* pszSQL = sqlite3_mprintf(
         "UPDATE gpkg_2d_gridded_coverage_ancillary SET data_null = ? "
         "WHERE tile_matrix_set_name = '%q'",

@@ -470,6 +470,11 @@ CPLErr PDS4MaskBand::IReadBlock( int nXBlock, int nYBlock, void *pImage )
         FillMask<GByte>(m_pBuffer, pabyDst, nReqXSize, nReqYSize, nBlockXSize,
                         m_adfConstants);
     }
+    else if( eSrcDT == GDT_Int8 )
+    {
+        FillMask<GInt8>(m_pBuffer, pabyDst, nReqXSize, nReqYSize, nBlockXSize,
+                        m_adfConstants);
+    }
     else if( eSrcDT == GDT_UInt16 )
     {
         FillMask<GUInt16>(m_pBuffer, pabyDst, nReqXSize, nReqYSize, nBlockXSize,
@@ -511,6 +516,7 @@ CPLErr PDS4MaskBand::IReadBlock( int nXBlock, int nYBlock, void *pImage )
 
 PDS4Dataset::PDS4Dataset()
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_adfGeoTransform[0] = 0.0;
     m_adfGeoTransform[1] = 1.0;
     m_adfGeoTransform[2] = 0.0;
@@ -575,30 +581,30 @@ int PDS4Dataset::CloseDependentDatasets()
 }
 
 /************************************************************************/
-/*                          GetProjectionRef()                          */
+/*                         GetSpatialRef()                              */
 /************************************************************************/
 
-const char *PDS4Dataset::_GetProjectionRef()
-
+const OGRSpatialReference* PDS4Dataset::GetSpatialRef() const
 {
-    if( !m_osWKT.empty() )
-        return m_osWKT;
-
-    return GDALPamDataset::_GetProjectionRef();
+    if( !m_oSRS.IsEmpty() )
+        return &m_oSRS;
+    return GDALPamDataset::GetSpatialRef();
 }
 
 /************************************************************************/
-/*                           SetProjection()                            */
+/*                           SetSpatialRef()                            */
 /************************************************************************/
 
-CPLErr PDS4Dataset::_SetProjection(const char* pszWKT)
+CPLErr PDS4Dataset::SetSpatialRef(const OGRSpatialReference* poSRS )
 
 {
     if( eAccess == GA_ReadOnly )
         return CE_Failure;
-    m_osWKT = pszWKT;
+    m_oSRS.Clear();
+    if( poSRS )
+        m_oSRS = *poSRS;
     if( m_poExternalDS )
-        m_poExternalDS->SetProjection(pszWKT);
+        m_poExternalDS->SetSpatialRef(poSRS);
     return CE_None;
 }
 
@@ -1407,13 +1413,11 @@ void PDS4Dataset::ReadGeoreferencing(CPLXMLNode* psProduct)
         }
     }
 
-    char* pszWKT = nullptr;
-    oSRS.exportToWkt(&pszWKT);
-    if( pszWKT )
+    if( !oSRS.IsEmpty() )
     {
         if( GetRasterCount() )
         {
-            m_osWKT = pszWKT;
+            m_oSRS = oSRS;
         }
         else if( GetLayerCount() )
         {
@@ -1428,7 +1432,6 @@ void PDS4Dataset::ReadGeoreferencing(CPLXMLNode* psProduct)
             }
         }
     }
-    CPLFree(pszWKT);
 }
 
 /************************************************************************/
@@ -1738,7 +1741,6 @@ PDS4Dataset* PDS4Dataset::OpenInternal(GDALOpenInfo* poOpenInfo)
             const char* pszDataType = CPLGetXMLValue(psSubIter,
                                         "Element_Array.data_type", "");
             GDALDataType eDT = GDT_Byte;
-            bool bSignedByte = false;
             bool bLSBOrder = strstr(pszDataType, "LSB") != nullptr;
 
             // ComplexLSB16', 'ComplexLSB8', 'ComplexMSB16', 'ComplexMSB8', 'IEEE754LSBDouble', 'IEEE754LSBSingle', 'IEEE754MSBDouble', 'IEEE754MSBSingle', 'SignedBitString', 'SignedByte', 'SignedLSB2', 'SignedLSB4', 'SignedLSB8', 'SignedMSB2', 'SignedMSB4', 'SignedMSB8', 'UnsignedBitString', 'UnsignedByte', 'UnsignedLSB2', 'UnsignedLSB4', 'UnsignedLSB8', 'UnsignedMSB2', 'UnsignedMSB4', 'UnsignedMSB8'
@@ -1765,8 +1767,7 @@ PDS4Dataset* PDS4Dataset::OpenInternal(GDALOpenInfo* poOpenInfo)
             // SignedBitString unhandled
             else if( EQUAL(pszDataType, "SignedByte") )
             {
-                eDT = GDT_Byte;
-                bSignedByte = true;
+                eDT = GDT_Int8;
             }
             else if( EQUAL(pszDataType, "SignedLSB2") ||
                      EQUAL(pszDataType, "SignedMSB2") )
@@ -2062,11 +2063,6 @@ PDS4Dataset* PDS4Dataset::OpenInternal(GDALOpenInfo* poOpenInfo)
                 {
                     poBand->SetNoDataValue(dfNoData);
                 }
-                if( bSignedByte )
-                {
-                    poBand->GDALRasterBand::SetMetadataItem(
-                        "PIXELTYPE", "SIGNEDBYTE", "IMAGE_STRUCTURE");
-                }
                 poBand->SetOffset( dfValueOffset );
                 poBand->SetScale( dfValueScale );
 
@@ -2174,14 +2170,11 @@ static bool IsCARTVersionGTE(const char* pszCur, const char* pszRef)
 /************************************************************************/
 
 void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
-                                      const char* pszWKT,
                                       const char* pszCARTVersion)
 {
     bool bHasBoundingBox = false;
     double adfX[4] = {0};
     double adfY[4] = {0};
-    OGRSpatialReference oSRS;
-    oSRS.SetFromUserInput(pszWKT, OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get());
     CPLString osPrefix;
     const char* pszColon = strchr(psCart->pszValue, ':');
     if( pszColon )
@@ -2229,15 +2222,15 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
         }
     }
 
-    if( bHasBoundingBox && !oSRS.IsGeographic() )
+    if( bHasBoundingBox && !m_oSRS.IsGeographic() )
     {
         bHasBoundingBox = false;
-        OGRSpatialReference* poSRSLongLat = oSRS.CloneGeogCS();
+        OGRSpatialReference* poSRSLongLat = m_oSRS.CloneGeogCS();
         if( poSRSLongLat )
         {
             poSRSLongLat->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
             OGRCoordinateTransformation* poCT =
-                OGRCreateCoordinateTransformation(&oSRS, poSRSLongLat);
+                OGRCreateCoordinateTransformation(&m_oSRS, poSRSLongLat);
             if( poCT )
             {
                 if( poCT->Transform(4, adfX, adfY) )
@@ -2342,13 +2335,13 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
         dfMapProjectionRotation = 90.0;
     }
 
-    if( GetRasterCount() || oSRS.IsProjected() )
+    if( GetRasterCount() || m_oSRS.IsProjected() )
     {
         CPLXMLNode* psPlanar = CPLCreateXMLNode(psHCSD, CXT_Element,
                     (osPrefix + "Planar").c_str());
         CPLXMLNode* psMP = CPLCreateXMLNode(psPlanar, CXT_Element,
                     (osPrefix + "Map_Projection").c_str());
-        const char* pszProjection = oSRS.GetAttrValue("PROJECTION");
+        const char* pszProjection = m_oSRS.GetAttrValue("PROJECTION");
         CPLString pszPDS4ProjectionName = "";
         typedef std::pair<const char*, double> ProjParam;
         std::vector<ProjParam> aoProjParams;
@@ -2382,20 +2375,20 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             if( bUse_CART_1933_Or_Later )
             {
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
                 aoProjParams.push_back(ProjParam("standard_parallel_1",
-                        oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 1.0)));
                 aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             }
             else
             {
                 aoProjParams.push_back(ProjParam("standard_parallel_1",
-                        oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 1.0)));
                 aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
             }
         }
 
@@ -2405,20 +2398,20 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             if( bUse_CART_1933_Or_Later )
             {
                 aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
                 aoProjParams.push_back(ProjParam("scale_factor_at_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
             }
             else
             {
                 aoProjParams.push_back(ProjParam("scale_factor_at_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
                 aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
             }
         }
 
@@ -2426,13 +2419,13 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
         {
             pszPDS4ProjectionName = "Lambert Conformal Conic";
             aoProjParams.push_back(ProjParam("standard_parallel_1",
-                    oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 0.0)));
             aoProjParams.push_back(ProjParam("standard_parallel_2",
-                    oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_2, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_2, 0.0)));
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
 
         else if( EQUAL(pszProjection, SRS_PT_HOTINE_OBLIQUE_MERCATOR_AZIMUTH_CENTER) )
@@ -2453,22 +2446,22 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             if( bUse_CART_1950_Or_Later )
             {
                 aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
                 aoProjParams.push_back(ProjParam("scale_factor_at_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
             }
             else
             {
                 aoProjParams.push_back(ProjParam(
                     bUse_CART_1933_Or_Later ?  "longitude_of_central_meridian" :
                                                "straight_vertical_longitude_from_pole",
-                        FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                        FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
                 aoProjParams.push_back(ProjParam("scale_factor_at_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
                 aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                        oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                        m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
             }
         }
 
@@ -2476,72 +2469,72 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
         {
             pszPDS4ProjectionName = "Polyconic";
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
         else if( EQUAL(pszProjection, SRS_PT_SINUSOIDAL) )
         {
             pszPDS4ProjectionName = "Sinusoidal";
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
 
         else if( EQUAL(pszProjection, SRS_PT_TRANSVERSE_MERCATOR) )
         {
             pszPDS4ProjectionName = "Transverse Mercator";
             aoProjParams.push_back(ProjParam("scale_factor_at_central_meridian",
-                    oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
         else if( EQUAL(pszProjection, SRS_PT_ORTHOGRAPHIC) )
         {
             pszPDS4ProjectionName = "Orthographic";
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
 
         else if( EQUAL(pszProjection, SRS_PT_MERCATOR_1SP) )
         {
             pszPDS4ProjectionName = "Mercator";
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
             aoProjParams.push_back(ProjParam("scale_factor_at_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 1.0)));
         }
 
         else if( EQUAL(pszProjection, SRS_PT_MERCATOR_2SP) )
         {
             pszPDS4ProjectionName = "Mercator";
             aoProjParams.push_back(ProjParam("standard_parallel_1",
-                    oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_STANDARD_PARALLEL_1, 0.0)));
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
 
         else if( EQUAL(pszProjection, SRS_PT_LAMBERT_AZIMUTHAL_EQUAL_AREA) )
         {
             pszPDS4ProjectionName = "Lambert Azimuthal Equal Area";
             aoProjParams.push_back(ProjParam("longitude_of_central_meridian",
-                    FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
+                    FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0))));
             aoProjParams.push_back(ProjParam("latitude_of_projection_origin",
-                    oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
+                    m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)));
         }
 
         else if( EQUAL(pszProjection, "custom_proj4") )
         {
-            const char* pszProj4 = oSRS.GetExtension("PROJCS", "PROJ4", nullptr);
+            const char* pszProj4 = m_oSRS.GetExtension("PROJCS", "PROJ4", nullptr);
             if( pszProj4 && strstr(pszProj4, "+proj=ob_tran" ) &&
                 strstr(pszProj4, "+o_proj=eqc") )
             {
@@ -2609,13 +2602,13 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLA,
                     (osPrefix + "azimuthal_angle").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_AZIMUTH, 0.0))),
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_AZIMUTH, 0.0))),
                 "unit", "deg");;
             // Not completely sure of this
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLA,
                     (osPrefix + "azimuth_measure_point_longitude").c_str(),
-                    CPLSPrintf("%.18g", FixLong(oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)))),
+                    CPLSPrintf("%.18g", FixLong(m_oSRS.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN, 0.0)))),
                 "unit", "deg");
 
             if( bUse_CART_1933_Or_Later )
@@ -2628,7 +2621,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                         "0"),
                     "unit", "deg");
 
-                const double dfScaleFactor = oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0);
+                const double dfScaleFactor = m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0);
                 if( dfScaleFactor != 1.0 )
                 {
                     CPLError(CE_Warning, CPLE_NotSupported,
@@ -2641,7 +2634,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             {
                 CPLCreateXMLElementAndValue(psProj,
                     (osPrefix + "scale_factor_at_projection_origin").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0)));
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0)));
 
                 CPLAddXMLChild(psProj, psOLA);
             }
@@ -2649,7 +2642,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psProj,
                     (osPrefix + "latitude_of_projection_origin").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0))),
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0))),
                 "unit", "deg");
         }
         else if( pszProjection &&
@@ -2657,7 +2650,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
         {
             if( bUse_CART_1933_Or_Later )
             {
-                const double dfScaleFactor = oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0);
+                const double dfScaleFactor = m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0);
                 if( dfScaleFactor != 1.0 )
                 {
                     CPLError(CE_Warning, CPLE_NotSupported,
@@ -2670,7 +2663,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             {
                 CPLCreateXMLElementAndValue(psProj,
                     (osPrefix + "scale_factor_at_projection_origin").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0)));
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_SCALE_FACTOR, 0.0)));
             }
 
             CPLXMLNode* psOLP = CPLCreateXMLNode(psProj, CXT_Element,
@@ -2680,24 +2673,24 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLPG1,
                     (osPrefix + "oblique_line_latitude").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_POINT_1, 0.0))),
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_POINT_1, 0.0))),
                 "unit", "deg");
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLPG1,
                     (osPrefix + "oblique_line_longitude").c_str(),
-                    CPLSPrintf("%.18g", FixLong(oSRS.GetNormProjParm(SRS_PP_LONGITUDE_OF_POINT_1, 0.0)))),
+                    CPLSPrintf("%.18g", FixLong(m_oSRS.GetNormProjParm(SRS_PP_LONGITUDE_OF_POINT_1, 0.0)))),
                 "unit", "deg");
             CPLXMLNode* psOLPG2 = CPLCreateXMLNode(psOLP, CXT_Element,
                                     (osPrefix + "Oblique_Line_Point_Group").c_str());
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLPG2,
                     (osPrefix + "oblique_line_latitude").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_POINT_2, 0.0))),
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_POINT_2, 0.0))),
                 "unit", "deg");
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psOLPG2,
                     (osPrefix + "oblique_line_longitude").c_str(),
-                    CPLSPrintf("%.18g", oSRS.GetNormProjParm(SRS_PP_LONGITUDE_OF_POINT_2, 0.0))),
+                    CPLSPrintf("%.18g", m_oSRS.GetNormProjParm(SRS_PP_LONGITUDE_OF_POINT_2, 0.0))),
                 "unit", "deg");
 
             if( bUse_CART_1933_Or_Later )
@@ -2712,7 +2705,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psProj,
                     (osPrefix + "latitude_of_projection_origin").c_str(),
-                    CPLSPrintf("%.18g", FixLong(oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)))),
+                    CPLSPrintf("%.18g", FixLong(m_oSRS.GetNormProjParm(SRS_PP_LATITUDE_OF_ORIGIN, 0.0)))),
                 "unit", "deg");
         }
 
@@ -2727,8 +2720,8 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             psCR = CPLCreateXMLNode(psPCI, CXT_Element,
                             (osPrefix + "Coordinate_Representation").c_str());
         }
-        const double dfLinearUnits = oSRS.GetLinearUnits();
-        const double dfDegToMeter = oSRS.GetSemiMajor() * M_PI / 180.0;
+        const double dfLinearUnits = m_oSRS.GetLinearUnits();
+        const double dfDegToMeter = m_oSRS.GetSemiMajor() * M_PI / 180.0;
 
         if( psCR == nullptr )
         {
@@ -2757,7 +2750,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                     "0"),
                 "unit", "pixel/deg");
         }
-        else if( oSRS.IsGeographic() )
+        else if( m_oSRS.IsGeographic() )
         {
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psCR,
@@ -2780,7 +2773,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                     CPLSPrintf("%.18g", 1.0 / (-dfUnrotatedResY))),
                 "unit", "pixel/deg");
         }
-        else if( oSRS.IsProjected() )
+        else if( m_oSRS.IsProjected() )
         {
             CPLAddXMLAttributeAndValue(
                 CPLCreateXMLElementAndValue(psCR,
@@ -2809,12 +2802,12 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
             CPLXMLNode* psGT = CPLCreateXMLNode(psPlanar, CXT_Element,
                                                 (osPrefix + "Geo_Transformation").c_str());
             const double dfFalseEasting =
-                oSRS.GetNormProjParm(SRS_PP_FALSE_EASTING, 0.0);
+                m_oSRS.GetNormProjParm(SRS_PP_FALSE_EASTING, 0.0);
             const double dfFalseNorthing =
-                oSRS.GetNormProjParm(SRS_PP_FALSE_NORTHING, 0.0);
+                m_oSRS.GetNormProjParm(SRS_PP_FALSE_NORTHING, 0.0);
             const double dfULX = -dfFalseEasting + dfUnrotatedULX;
             const double dfULY = -dfFalseNorthing + dfUnrotatedULY;
-            if( oSRS.IsGeographic() )
+            if( m_oSRS.IsGeographic() )
             {
                 CPLAddXMLAttributeAndValue(
                         CPLCreateXMLElementAndValue(psGT,
@@ -2827,7 +2820,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                             CPLSPrintf("%.18g", dfULY * dfDegToMeter)),
                         "unit", "m");
             }
-            else if( oSRS.IsProjected() )
+            else if( m_oSRS.IsProjected() )
             {
                 CPLAddXMLAttributeAndValue(
                         CPLCreateXMLElementAndValue(psGT,
@@ -2875,7 +2868,7 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                                 (osPrefix + "latitude_type").c_str(),
                                 pszLatitudeType);
 
-    const char* pszDatum = oSRS.GetAttrValue("DATUM");
+    const char* pszDatum = m_oSRS.GetAttrValue("DATUM");
     if( pszDatum && STARTS_WITH(pszDatum, "D_") )
     {
         CPLCreateXMLElementAndValue(psGM,
@@ -2889,8 +2882,8 @@ void PDS4Dataset::WriteGeoreferencing(CPLXMLNode* psCart,
                                     pszDatum);
     }
 
-    double dfSemiMajor = oSRS.GetSemiMajor();
-    double dfSemiMinor = oSRS.GetSemiMinor();
+    double dfSemiMajor = m_oSRS.GetSemiMajor();
+    double dfSemiMinor = m_oSRS.GetSemiMinor();
     const char* pszRadii = CSLFetchNameValue(m_papszCreationOptions, "RADII");
     if( pszRadii )
     {
@@ -3286,6 +3279,7 @@ void PDS4Dataset::WriteArray(const CPLString& osPrefix,
     GDALDataType eDT = GetRasterBand(1)->GetRasterDataType();
     const char* pszDataType =
         (eDT == GDT_Byte) ? "UnsignedByte" :
+        (eDT == GDT_Int8) ? "SignedByte" :
         (eDT == GDT_UInt16) ? "UnsignedLSB2" :
         (eDT == GDT_Int16) ? (m_bIsLSB ? "SignedLSB2" : "SignedMSB2") :
         (eDT == GDT_UInt32) ? (m_bIsLSB ? "UnsignedLSB4": "UnsignedMSB4") :
@@ -3516,25 +3510,20 @@ void PDS4Dataset::CreateHeader(CPLXMLNode* psProduct,
     if( STARTS_WITH(psProduct->pszValue, "pds:") )
         osPrefix = "pds:";
 
-    CPLString osWKT(m_osWKT);
     OGREnvelope sExtent;
-    if( osWKT.empty() && GetLayerCount() >= 1 &&
+    if( m_oSRS.IsEmpty() && GetLayerCount() >= 1 &&
         GetLayer(0)->GetSpatialRef() != nullptr )
     {
-        char* pszWKT = nullptr;
-        GetLayer(0)->GetSpatialRef()->exportToWkt(&pszWKT);
-        if( pszWKT )
-            osWKT = pszWKT;
-        CPLFree(pszWKT);
+        const auto poSRS = GetLayer(0)->GetSpatialRef();
+        if( poSRS )
+            m_oSRS = *poSRS;
     }
 
-    if( !osWKT.empty() &&
+    if( !m_oSRS.IsEmpty() &&
             CSLFetchNameValue(m_papszCreationOptions, "VAR_TARGET") == nullptr )
     {
-        OGRSpatialReference oSRS;
-        oSRS.SetFromUserInput(osWKT);
         const char* pszTarget = nullptr;
-        if( fabs(oSRS.GetSemiMajor() - 6378137) < 0.001 * 6378137 )
+        if( fabs(m_oSRS.GetSemiMajor() - 6378137) < 0.001 * 6378137 )
         {
             pszTarget = "Earth";
             m_papszCreationOptions = CSLSetNameValue(
@@ -3542,7 +3531,7 @@ void PDS4Dataset::CreateHeader(CPLXMLNode* psProduct,
         }
         else
         {
-            const char* pszDatum = oSRS.GetAttrValue("DATUM");
+            const char* pszDatum = m_oSRS.GetAttrValue("DATUM");
             if( pszDatum && STARTS_WITH(pszDatum, "D_") )
             {
                 pszTarget = pszDatum + 2;
@@ -3591,11 +3580,11 @@ void PDS4Dataset::CreateHeader(CPLXMLNode* psProduct,
                     pszDefault));
     };
 
-    if( GetRasterCount() || !osWKT.empty() )
+    if( GetRasterCount() || !m_oSRS.IsEmpty() )
     {
         CPLXMLNode* psDisciplineArea = CPLGetXMLNode(psProduct,
             (osPrefix + "Observation_Area." + osPrefix + "Discipline_Area").c_str());
-        if( GetRasterCount() && !(m_bGotTransform && !osWKT.empty()) )
+        if( GetRasterCount() && !(m_bGotTransform && !m_oSRS.IsEmpty()) )
         {
             // if we have no georeferencing, strip any existing georeferencing
             // from the template
@@ -3726,7 +3715,7 @@ void PDS4Dataset::CreateHeader(CPLXMLNode* psProduct,
                             "cartography_parameters_to_image_object");
             }
 
-            WriteGeoreferencing(psCart, osWKT, pszCARTVersion);
+            WriteGeoreferencing(psCart, pszCARTVersion);
         }
 
         const char* pszVertDir = CSLFetchNameValue(m_papszCreationOptions,
@@ -4185,7 +4174,8 @@ PDS4Dataset *PDS4Dataset::CreateInternal(const char *pszFilename,
     if( nXSize == 0 )
         return nullptr;
 
-    if( !(eType == GDT_Byte || eType == GDT_Int16 || eType == GDT_UInt16 ||
+    if( !(eType == GDT_Byte || eType == GDT_Int8 ||
+          eType == GDT_Int16 || eType == GDT_UInt16 ||
           eType == GDT_Int32 || eType == GDT_UInt32 || eType == GDT_Float32 ||
           eType == GDT_Float64 || eType == GDT_CFloat32 ||
           eType == GDT_CFloat64) )
@@ -4833,11 +4823,12 @@ void GDALRegister_PDS4()
                                "drivers/raster/pds4.html" );
     poDriver->SetMetadataItem( GDAL_DMD_EXTENSION, "xml" );
     poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES,
-                               "Byte UInt16 Int16 UInt32 Int32 Float32 "
+                               "Byte Int8 UInt16 Int16 UInt32 Int32 Float32 "
                                "Float64 CFloat32 CFloat64" );
     poDriver->SetMetadataItem( GDAL_DMD_OPENOPTIONLIST, "<OpenOptionList/>");
     poDriver->SetMetadataItem( GDAL_DCAP_VIRTUALIO, "YES" );
     poDriver->SetMetadataItem( GDAL_DMD_SUBDATASETS, "YES" );
+    poDriver->SetMetadataItem( GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE" );
 
     poDriver->SetMetadataItem( GDAL_DMD_OPENOPTIONLIST,
 "<OpenOptionList>"

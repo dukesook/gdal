@@ -69,7 +69,7 @@ class GDALEEDAIDataset final: public GDALEEDABaseDataset
 #endif
             CPLString   m_osPixelEncoding{};
             bool        m_bQueryMultipleBands;
-            CPLString   m_osWKT{};
+            OGRSpatialReference m_oSRS{};
             double      m_adfGeoTransform[6];
             std::vector<GDALEEDAIDataset*> m_apoOverviewDS{};
 
@@ -83,10 +83,7 @@ class GDALEEDAIDataset final: public GDALEEDABaseDataset
                 GDALEEDAIDataset();
                 virtual ~GDALEEDAIDataset();
 
-                virtual const char* _GetProjectionRef() override;
-                const OGRSpatialReference* GetSpatialRef() const override {
-                    return GetSpatialRefFromOldGetProjectionRef();
-                }
+                const OGRSpatialReference* GetSpatialRef() const override;
                 virtual CPLErr GetGeoTransform( double* ) override;
 
                 virtual CPLErr IRasterIO( GDALRWFlag eRWFlag,
@@ -141,8 +138,7 @@ class GDALEEDAIRasterBand final: public GDALRasterBand
 
     public:
                 GDALEEDAIRasterBand(GDALEEDAIDataset *poDSIn,
-                                    GDALDataType eDT,
-                                    bool bSignedByte);
+                                    GDALDataType eDT);
                 virtual ~GDALEEDAIRasterBand();
 
                 virtual CPLErr IRasterIO( GDALRWFlag eRWFlag,
@@ -173,6 +169,7 @@ GDALEEDAIDataset::GDALEEDAIDataset() :
 #endif
     m_bQueryMultipleBands(false)
 {
+    m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_adfGeoTransform[0] = 0.0;
     m_adfGeoTransform[1] = 1.0;
     m_adfGeoTransform[2] = 0.0;
@@ -196,7 +193,7 @@ GDALEEDAIDataset::GDALEEDAIDataset(GDALEEDAIDataset* poParentDS,
 #endif
     m_osPixelEncoding(poParentDS->m_osPixelEncoding),
     m_bQueryMultipleBands(poParentDS->m_bQueryMultipleBands),
-    m_osWKT(poParentDS->m_osWKT)
+    m_oSRS(poParentDS->m_oSRS)
 {
     m_osBaseURL = poParentDS->m_osBaseURL;
     nRasterXSize = m_poParentDS->nRasterXSize >> iOvrLevel;
@@ -228,17 +225,12 @@ GDALEEDAIDataset::~GDALEEDAIDataset()
 /************************************************************************/
 
 GDALEEDAIRasterBand::GDALEEDAIRasterBand(GDALEEDAIDataset* poDSIn,
-                                         GDALDataType eDT,
-                                         bool bSignedByte) :
+                                         GDALDataType eDT) :
     m_eInterp(GCI_Undefined)
 {
     eDataType = eDT;
     nBlockXSize = poDSIn->m_nBlockSize;
     nBlockYSize = poDSIn->m_nBlockSize;
-    if( bSignedByte )
-    {
-        SetMetadataItem("PIXELTYPE", "SIGNEDBYTE", "IMAGE_STRUCTURE");
-    }
 }
 
 /************************************************************************/
@@ -1222,12 +1214,12 @@ bool GDALEEDAIDataset::ComputeQueryStrategy()
 }
 
 /************************************************************************/
-/*                          GetProjectionRef()                          */
+/*                          GetSpatialRef()                             */
 /************************************************************************/
 
-const char* GDALEEDAIDataset::_GetProjectionRef()
+const OGRSpatialReference* GDALEEDAIDataset::GetSpatialRef() const
 {
-    return m_osWKT.c_str();
+    return m_oSRS.IsEmpty() ? nullptr : &m_oSRS;
 }
 
 /************************************************************************/
@@ -1404,7 +1396,7 @@ bool GDALEEDAIDataset::Open(GDALOpenInfo* poOpenInfo)
                 nRasterYSize = aoBandDesc[i].nHeight;
                 memcpy(m_adfGeoTransform, aoBandDesc[i].adfGeoTransform.data(),
                        6 * sizeof(double));
-                m_osWKT = aoBandDesc[i].osWKT;
+                m_oSRS.importFromWkt(aoBandDesc[i].osWKT);
                 int iOvr = 0;
                 while( (nRasterXSize >> iOvr) > 256 ||
                        (nRasterYSize >> iOvr) > 256 )
@@ -1416,8 +1408,7 @@ bool GDALEEDAIDataset::Open(GDALOpenInfo* poOpenInfo)
             }
 
             GDALRasterBand* poBand =
-                new GDALEEDAIRasterBand(this, aoBandDesc[i].eDT,
-                                        aoBandDesc[i].bSignedByte);
+                new GDALEEDAIRasterBand(this, aoBandDesc[i].eDT);
             const int iBand = nBands + 1;
             SetBand( iBand, poBand );
             poBand->SetDescription( aoBandDesc[i].osName );
@@ -1434,8 +1425,7 @@ bool GDALEEDAIDataset::Open(GDALOpenInfo* poOpenInfo)
             {
                 GDALRasterBand* poOvrBand =
                     new GDALEEDAIRasterBand(m_apoOverviewDS[iOvr],
-                                            aoBandDesc[i].eDT,
-                                            aoBandDesc[i].bSignedByte);
+                                            aoBandDesc[i].eDT);
                 m_apoOverviewDS[iOvr]->SetBand( iBand, poOvrBand );
                 poOvrBand->SetDescription( aoBandDesc[i].osName );
             }

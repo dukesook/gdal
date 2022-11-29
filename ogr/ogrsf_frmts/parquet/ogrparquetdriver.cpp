@@ -35,6 +35,7 @@
 #include "../arrow_common/ograrrowrandomaccessfile.h"
 #include "../arrow_common/ograrrowwritablefile.h"
 #include "../arrow_common/ograrrowdataset.hpp"
+#include "../arrow_common/ograrrowlayer.hpp"  // for the destructor
 
 /************************************************************************/
 /*                             Identify()                               */
@@ -779,6 +780,7 @@ void RegisterOGRParquet()
                                "Binary IntegerList Integer64List RealList StringList" );
     poDriver->SetMetadataItem( GDAL_DMD_CREATIONFIELDDATASUBTYPES,
                                "Boolean Int16 Float32 JSON UUID" );
+    poDriver->SetMetadataItem( GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE" );
 
     poDriver->pfnOpen = OGRParquetDriverOpen;
     poDriver->pfnIdentify = OGRParquetDriverIdentify;

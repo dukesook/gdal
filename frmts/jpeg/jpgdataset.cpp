@@ -43,6 +43,7 @@
 #if HAVE_FCNTL_H
 #  include <fcntl.h>
 #endif
+#include <limits>
 #include <setjmp.h>
 
 #include <algorithm>
@@ -70,7 +71,6 @@ CPL_C_END
 #include "rawdataset.h"
 #include "vsidataio.h"
 
-CPL_CVSID("$Id$")
 
 #if defined(EXPECTED_JPEG_LIB_VERSION) && !defined(LIBJPEG_12_PATH)
 #if EXPECTED_JPEG_LIB_VERSION != JPEG_LIB_VERSION
@@ -94,10 +94,29 @@ constexpr int JPEG_EXIF_JPEGIFBYTECOUNT = 0x202;
 #  pragma warning(disable:4611)
 #endif
 
-
-
 // Do we want to do special processing suitable for when JSAMPLE is a
 // 16bit value?
+
+/* HAVE_JPEGTURBO_DUAL_MODE_8_12 is defined for libjpeg-turbo >= 2.2 which
+ * adds a dual-mode 8/12 bit API in the same library.
+ */
+
+#if defined(HAVE_JPEGTURBO_DUAL_MODE_8_12)
+/* Start by undefining BITS_IN_JSAMPLE which is always set to 8 in libjpeg-turbo >= 2.2
+ * Cf https://github.com/libjpeg-turbo/libjpeg-turbo/commit/8b9bc4b9635a2a047fb23ebe70c9acd728d3f99b */
+#  undef BITS_IN_JSAMPLE
+/* libjpeg-turbo >= 2.2 adds J12xxxx datatypes for the 12-bit mode. */
+# if defined(JPGDataset)
+#  define BITS_IN_JSAMPLE 12
+#  define GDAL_JSAMPLE    J12SAMPLE
+# else
+#  define BITS_IN_JSAMPLE 8
+#  define GDAL_JSAMPLE    JSAMPLE
+# endif
+#else
+# define GDAL_JSAMPLE    JSAMPLE
+#endif
+
 #if defined(JPEG_LIB_MK1)
 #  define JPEG_LIB_MK1_OR_12BIT 1
 #elif BITS_IN_JSAMPLE == 12
@@ -1222,6 +1241,8 @@ JPGRasterBand::JPGRasterBand( JPGDatasetCommon *poDSIn, int nBandIn ) :
     nBlockYSize = 1;
 
     GDALMajorObject::SetMetadataItem("COMPRESSION", "JPEG", "IMAGE_STRUCTURE");
+    if( eDataType == GDT_UInt16 )
+        GDALMajorObject::SetMetadataItem("NBITS", "12", "IMAGE_STRUCTURE");
 }
 
 /************************************************************************/
@@ -1475,7 +1496,6 @@ JPGDatasetCommon::JPGDatasetCommon() :
     nInternalOverviewsCurrent(0),
     nInternalOverviewsToFree(0),
     papoInternalOverviews(nullptr),
-    pszProjection(nullptr),
     bGeoTransformValid(false),
     nGCPCount(0),
     pasGCPList(nullptr),
@@ -1527,9 +1547,6 @@ JPGDatasetCommon::~JPGDatasetCommon()
         CPLFree(m_pabyScanline);
     if( papszMetadata != nullptr )
         CSLDestroy(papszMetadata);
-
-    if ( pszProjection )
-        CPLFree(pszProjection);
 
     if ( nGCPCount > 0 )
     {
@@ -1827,10 +1844,12 @@ void JPGDatasetCommon::InitInternalOverviews()
 
 CPLErr JPGDatasetCommon::IBuildOverviews( const char *pszResampling,
                                           int nOverviewsListCount,
-                                          int *panOverviewList,
-                                          int nListBands, int *panBandList,
+                                          const int *panOverviewList,
+                                          int nListBands,
+                                          const int *panBandList,
                                           GDALProgressFunc pfnProgress,
-                                          void * pProgressData )
+                                          void * pProgressData,
+                                          CSLConstList papszOptions )
 {
     bHasInitInternalOverviews = true;
     nInternalOverviewsCurrent = 0;
@@ -1839,7 +1858,8 @@ CPLErr JPGDatasetCommon::IBuildOverviews( const char *pszResampling,
                                            nOverviewsListCount,
                                            panOverviewList,
                                            nListBands, panBandList,
-                                           pfnProgress, pProgressData);
+                                           pfnProgress, pProgressData,
+                                           papszOptions);
 }
 
 /************************************************************************/
@@ -2045,9 +2065,13 @@ CPLErr JPGDataset::LoadScanline( int iLine, GByte* outBuffer )
 
     while( nLoadedScanline < iLine )
     {
-        JSAMPLE *ppSamples = reinterpret_cast<JSAMPLE *>(
+        GDAL_JSAMPLE *ppSamples = reinterpret_cast<GDAL_JSAMPLE *>(
             outBuffer ? outBuffer : m_pabyScanline);
+#if defined(HAVE_JPEGTURBO_DUAL_MODE_8_12) && BITS_IN_JSAMPLE == 12
+        jpeg12_read_scanlines(&sDInfo, &ppSamples, 1);
+#else
         jpeg_read_scanlines(&sDInfo, &ppSamples, 1);
+#endif
         if( ErrorOutOnNonFatalError() )
             return CE_Failure;
         nLoadedScanline++;
@@ -2371,22 +2395,22 @@ int JPGDatasetCommon::GetGCPCount()
 }
 
 /************************************************************************/
-/*                          GetGCPProjection()                          */
+/*                          GetGCPSpatialRef()                          */
 /************************************************************************/
 
-const char *JPGDatasetCommon::_GetGCPProjection()
+const OGRSpatialReference *JPGDatasetCommon::GetGCPSpatialRef() const
 
 {
-    const int nPAMGCPCount = GDALPamDataset::GetGCPCount();
+    const int nPAMGCPCount = const_cast<JPGDatasetCommon*>(this)->GDALPamDataset::GetGCPCount();
     if( nPAMGCPCount != 0 )
-        return GDALPamDataset::_GetGCPProjection();
+        return GDALPamDataset::GetGCPSpatialRef();
 
-    LoadWorldFileOrTab();
+    const_cast<JPGDatasetCommon*>(this)->LoadWorldFileOrTab();
 
-    if( pszProjection && nGCPCount > 0 )
-        return pszProjection;
+    if( !m_oSRS.IsEmpty() && nGCPCount > 0 )
+        return &m_oSRS;
 
-    return "";
+    return nullptr;
 }
 
 /************************************************************************/
@@ -2763,6 +2787,7 @@ JPGDatasetCommon *JPGDataset::OpenStage2( JPGDatasetOpenArgs *psArgs,
     if (setjmp(poDS->sUserData.setjmp_buffer))
     {
 #if defined(JPEG_DUAL_MODE_8_12) && !defined(JPGDataset)
+
         if (poDS->sDInfo.data_precision == 12 && poDS->m_fpImage != nullptr)
         {
             VSILFILE *fpImage = poDS->m_fpImage;
@@ -2920,6 +2945,16 @@ JPGDatasetCommon *JPGDataset::OpenStage2( JPGDatasetOpenArgs *psArgs,
         return nullptr;
     }
 
+#if defined(JPEG_DUAL_MODE_8_12) && !defined(JPGDataset)
+    if (poDS->sDInfo.data_precision == 12 && poDS->m_fpImage != nullptr)
+    {
+        poDS->m_fpImage = nullptr;
+        delete poDS;
+        psArgs->fpLin = fpImage;
+        return JPEGDataset12Open(psArgs);
+    }
+#endif
+
     // Capture some information from the file that is of interest.
 
     poDS->nScaleFactor = nScaleFactor;
@@ -3072,9 +3107,13 @@ void JPGDatasetCommon::LoadWorldFileOrTab()
 
     if( !bGeoTransformValid )
     {
+        char* pszProjection = nullptr;
         const bool bTabFileOK = CPL_TO_BOOL(GDALReadTabFile2(
             GetDescription(), adfGeoTransform, &pszProjection, &nGCPCount,
             &pasGCPList, oOvManager.GetSiblingFiles(), &pszWldFilename));
+        if( pszProjection )
+            m_oSRS.importFromWkt(pszProjection);
+        CPLFree(pszProjection);
 
         if( bTabFileOK && nGCPCount == 0 )
             bGeoTransformValid = true;
@@ -3656,7 +3695,8 @@ void   JPGAddEXIF        ( GDALDataType eWorkDT,
         }
         CPLErr eErr = GDALRegenerateOverviewsMultiBand(nBands, papoSrcBands,
                                                        1, papapoOverviewBands,
-                                                       "AVERAGE", nullptr, nullptr);
+                                                       "AVERAGE", nullptr, nullptr,
+                                                       /* papszOptions = */ nullptr);
         CPLFree(papoSrcBands);
         for(int i = 0; i < nBands; i++)
         {
@@ -4048,11 +4088,16 @@ JPGDataset::CreateCopyStage2( const char *pszFilename, GDALDataset *poSrcDS,
             }
         }
 
-        JSAMPLE *ppSamples = reinterpret_cast<JSAMPLE *>(pabyScanline);
+        GDAL_JSAMPLE *ppSamples = reinterpret_cast<GDAL_JSAMPLE *>(pabyScanline);
 
         if( eErr == CE_None )
+        {
+#if defined(HAVE_JPEGTURBO_DUAL_MODE_8_12) && BITS_IN_JSAMPLE == 12
+            jpeg12_write_scanlines(&sCInfo, &ppSamples, 1);
+#else
             jpeg_write_scanlines(&sCInfo, &ppSamples, 1);
-
+#endif
+        }
         if( eErr == CE_None &&
             !pfnProgress(
                 (iLine + 1) / ((bAppendMask ? 2 : 1) *

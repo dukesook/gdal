@@ -137,41 +137,27 @@ class NUMPYDataset : public GDALDataset
 
     int           bValidGeoTransform;
     double	  adfGeoTransform[6];
-    char	  *pszProjection;
+    OGRSpatialReference m_oSRS{};
 
     int           nGCPCount;
     GDAL_GCP      *pasGCPList;
-    char          *pszGCPProjection;
+    OGRSpatialReference m_oGCPSRS{};;
 
   public:
                  NUMPYDataset();
                  ~NUMPYDataset();
 
-    virtual const char *_GetProjectionRef(void) override;
-    const OGRSpatialReference* GetSpatialRef() const override {
-        return GetSpatialRefFromOldGetProjectionRef();
-    }
-    virtual CPLErr _SetProjection( const char * ) override;
-    CPLErr SetSpatialRef(const OGRSpatialReference* poSRS) override {
-        return OldSetProjectionFromSetSpatialRef(poSRS);
-    }
+    const OGRSpatialReference* GetSpatialRef() const override;
+    CPLErr SetSpatialRef(const OGRSpatialReference* poSRS) override;
 
     virtual CPLErr GetGeoTransform( double * ) override;
     virtual CPLErr SetGeoTransform( double * ) override;
 
     virtual int    GetGCPCount() override;
-    virtual const char *_GetGCPProjection() override;
-    const OGRSpatialReference* GetGCPSpatialRef() const override {
-        return GetGCPSpatialRefFromOldGetGCPProjection();
-    }
+    const OGRSpatialReference* GetGCPSpatialRef() const override;
     virtual const GDAL_GCP *GetGCPs() override;
-    virtual CPLErr _SetGCPs( int nGCPCount, const GDAL_GCP *pasGCPList,
-                            const char *pszGCPProjection ) override;
-    using GDALDataset::SetGCPs;
     CPLErr SetGCPs( int nGCPCount, const GDAL_GCP *pasGCPList,
-                    const OGRSpatialReference* poSRS ) override {
-        return OldSetGCPsFromNew(nGCPCount, pasGCPList, poSRS);
-    }
+                    const OGRSpatialReference* poSRS ) override;
 
     static GDALDataset *Open( PyArrayObject *psArray, bool binterleave = true );
     static GDALDataset *Open( GDALOpenInfo * );
@@ -212,7 +198,6 @@ NUMPYDataset::NUMPYDataset()
 
 {
     psArray = NULL;
-    pszProjection = CPLStrdup("");
     bValidGeoTransform = FALSE;
     adfGeoTransform[0] = 0.0;
     adfGeoTransform[1] = 1.0;
@@ -223,7 +208,6 @@ NUMPYDataset::NUMPYDataset()
 
     nGCPCount = 0;
     pasGCPList = NULL;
-    pszGCPProjection = CPLStrdup("");
 }
 
 /************************************************************************/
@@ -233,9 +217,6 @@ NUMPYDataset::NUMPYDataset()
 NUMPYDataset::~NUMPYDataset()
 
 {
-    CPLFree( pszProjection );
-
-    CPLFree( pszGCPProjection );
     if( nGCPCount > 0 )
     {
         GDALDeinitGCPs( nGCPCount, pasGCPList );
@@ -253,24 +234,25 @@ NUMPYDataset::~NUMPYDataset()
 }
 
 /************************************************************************/
-/*                          GetProjectionRef()                          */
+/*                          GetSpatialRef()                             */
 /************************************************************************/
 
-const char *NUMPYDataset::_GetProjectionRef()
+const OGRSpatialReference *NUMPYDataset::GetSpatialRef() const
 
 {
-    return( pszProjection );
+    return m_oSRS.IsEmpty() ? nullptr:  &m_oSRS;
 }
 
 /************************************************************************/
-/*                           SetProjection()                            */
+/*                           SetSpatialRef()                            */
 /************************************************************************/
 
-CPLErr NUMPYDataset::_SetProjection( const char * pszNewProjection )
+CPLErr NUMPYDataset::SetSpatialRef( const OGRSpatialReference* poSRS )
 
 {
-    CPLFree( pszProjection );
-    pszProjection = CPLStrdup( pszNewProjection );
+    m_oSRS.Clear();
+    if( poSRS )
+        m_oSRS = *poSRS;
 
     return CE_None;
 }
@@ -312,13 +294,13 @@ int NUMPYDataset::GetGCPCount()
 }
 
 /************************************************************************/
-/*                          GetGCPProjection()                          */
+/*                          GetGCPSpatialRef()                          */
 /************************************************************************/
 
-const char *NUMPYDataset::_GetGCPProjection()
+const OGRSpatialReference *NUMPYDataset::GetGCPSpatialRef() const
 
 {
-    return pszGCPProjection;
+    return m_oGCPSRS.IsEmpty() ? nullptr:  &m_oGCPSRS;
 }
 
 /************************************************************************/
@@ -335,18 +317,19 @@ const GDAL_GCP *NUMPYDataset::GetGCPs()
 /*                              SetGCPs()                               */
 /************************************************************************/
 
-CPLErr NUMPYDataset::_SetGCPs( int nGCPCount, const GDAL_GCP *pasGCPList,
-                              const char *pszGCPProjection )
+CPLErr NUMPYDataset::SetGCPs( int nGCPCount, const GDAL_GCP *pasGCPList,
+                              const OGRSpatialReference* poSRS )
 
 {
-    CPLFree( this->pszGCPProjection );
+    m_oGCPSRS.Clear();
+    if( poSRS )
+        m_oGCPSRS = *poSRS;
+
     if( this->nGCPCount > 0 )
     {
         GDALDeinitGCPs( this->nGCPCount, this->pasGCPList );
         CPLFree( this->pasGCPList );
     }
-
-    this->pszGCPProjection = CPLStrdup(pszGCPProjection);
 
     this->nGCPCount = nGCPCount;
 
@@ -434,6 +417,8 @@ static GDALDataType NumpyTypeToGDALType(PyArrayObject *psArray)
         return GDT_UInt16;
 
       case NPY_BYTE:
+        return GDT_Int8;
+
       case NPY_UBYTE:
         return GDT_Byte;
 
@@ -1699,6 +1684,7 @@ PyObject* _RecordBatchAsNumpy(VoidPtrAsLong recordBatchPtr,
     switch(datatype)
     {
         case GDT_Byte: numpytype = NPY_UBYTE; break;
+        case GDT_Int8: numpytype = NPY_INT8; break;
         case GDT_Int16: numpytype = NPY_INT16; break;
         case GDT_UInt16: numpytype = NPY_UINT16; break;
         case GDT_Int32: numpytype = NPY_INT32; break;
@@ -2038,6 +2024,7 @@ from osgeo import gdal
 gdal.AllRegister()
 
 codes = {gdalconst.GDT_Byte: numpy.uint8,
+         gdalconst.GDT_Int8: numpy.int8,
          gdalconst.GDT_UInt16: numpy.uint16,
          gdalconst.GDT_Int16: numpy.int16,
          gdalconst.GDT_UInt32: numpy.uint32,
@@ -2077,8 +2064,6 @@ def flip_code(code):
     if isinstance(code, (numpy.dtype, type)):
         # since several things map to complex64 we must carefully select
         # the opposite that is an exact match (ticket 1518)
-        if code == numpy.int8:
-            return gdalconst.GDT_Byte
         if code == numpy.complex64:
             return gdalconst.GDT_CFloat32
 
@@ -2190,8 +2175,12 @@ def DatasetReadAsArray(ds, xoff=0, yoff=0, win_xsize=None, win_ysize=None, buf_o
         else:
             buf_type = NumericTypeCodeToGDALTypeCode(typecode)
 
-        if buf_type == gdalconst.GDT_Byte and ds.GetRasterBand(1).GetMetadataItem('PIXELTYPE', 'IMAGE_STRUCTURE') == 'SIGNEDBYTE':
-            typecode = numpy.int8
+        if buf_type == gdalconst.GDT_Byte:
+            band = ds.GetRasterBand(1)
+            band._EnablePixelTypeSignedByteWarning(False)
+            if band.GetMetadataItem('PIXELTYPE', 'IMAGE_STRUCTURE') == 'SIGNEDBYTE':
+                typecode = numpy.int8
+            band._EnablePixelTypeSignedByteWarning(True)
         buf_shape = (nbands, buf_ysize, buf_xsize) if interleave else (buf_ysize, buf_xsize, nbands)
         buf_obj = numpy.empty(buf_shape, dtype=typecode)
 
@@ -2320,8 +2309,11 @@ def BandReadAsArray(band, xoff=0, yoff=0, win_xsize=None, win_ysize=None,
         else:
             buf_type = NumericTypeCodeToGDALTypeCode(typecode)
 
-        if buf_type == gdalconst.GDT_Byte and band.GetMetadataItem('PIXELTYPE', 'IMAGE_STRUCTURE') == 'SIGNEDBYTE':
-            typecode = numpy.int8
+        if buf_type == gdalconst.GDT_Byte:
+            band._EnablePixelTypeSignedByteWarning(False)
+            if band.GetMetadataItem('PIXELTYPE', 'IMAGE_STRUCTURE') == 'SIGNEDBYTE':
+                typecode = numpy.int8
+            band._EnablePixelTypeSignedByteWarning(True)
         buf_obj = numpy.empty([buf_ysize, buf_xsize], dtype=typecode)
 
     else:

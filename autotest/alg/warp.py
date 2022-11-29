@@ -830,16 +830,9 @@ def test_warp_23():
     ds.SetGCPs(gcps, sr.ExportToWkt())
     ds = None
 
-    ds = gdal.Warp("", "tmp/test3582.tif", format="MEM")
-    ret = "success"
-    if ds is None:
-        gdaltest.post_reason("could not open output dataset")
-        ret = "fail"
-    ds = None
+    assert gdal.Warp("", "tmp/test3582.tif", format="MEM") is not None
 
     os.remove("tmp/test3582.tif")
-
-    return ret
 
 
 ###############################################################################
@@ -1770,9 +1763,13 @@ def test_warp_54(use_optim):
 
 def test_warp_55():
 
+    # data/warpedvrt_with_ovr.vrt uses a PNG
+    if gdal.GetDriverByName("PNG") is None:
+        pytest.skip("PNG driver missing")
+
     ds = gdal.Open("data/warpedvrt_with_ovr.vrt")
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    assert cs == 25128
+    assert cs == 25478
     ds = None
 
 
@@ -1905,3 +1902,13 @@ def test_warp_mode_ties():
     src_ds.GetRasterBand(1).WriteArray(numpy.array([[1, 5, 1], [2, 5, 4], [5, 1, 0]]))
     out_ds = gdal.Warp("", src_ds, format="MEM", resampleAlg="mode", xRes=3, yRes=3)
     assert out_ds.GetRasterBand(1).ReadAsArray()[0, 0] == 5
+
+
+###############################################################################
+# Test bugfix for #6526
+
+
+def test_warp_max_downsampling_missed_edges():
+
+    ds = gdal.Open("data/bug_6526_warped.vrt")
+    assert ds.GetRasterBand(1).ComputeRasterMinMax() == (1, 1)

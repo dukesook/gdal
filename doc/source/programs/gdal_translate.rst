@@ -17,7 +17,7 @@ Synopsis
 
 
     gdal_translate [--help-general]
-        [-ot {Byte/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
+        [-ot {Byte/Int8/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
                 CInt16/CInt32/CFloat32/CFloat64}] [-strict]
         [-if format]* [-of format]
         [-b band]* [-mask band] [-expand {gray|rgb|rgba}]
@@ -175,6 +175,11 @@ resampling, and rescaling pixels in the process.
     Apply the scale/offset metadata for the bands to convert scaled values to
     unscaled values.  It is also often necessary to reset the output datatype
     with the :option:`-ot` switch.
+    The unscaled value is computed from the scaled raw value with the following
+    formula:
+
+    .. math::
+        {unscaled\_value} = {scaled\_value} * {scale} + {offset}
 
 .. option:: -srcwin <xoff> <yoff> <xsize> <ysize>
 

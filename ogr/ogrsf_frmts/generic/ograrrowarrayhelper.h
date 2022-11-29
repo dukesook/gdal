@@ -31,6 +31,7 @@
 //! @cond Doxygen_Suppress
 
 #include <algorithm>
+#include <limits>
 
 #include "cpl_time.h"
 
@@ -54,6 +55,8 @@ public:
     std::vector<uint32_t> anArrowFieldMaxAlloc{};
     int64_t* panFIDValues = nullptr;
     struct ArrowArray* m_out_array = nullptr;
+
+    static int GetMaxFeaturesInBatch(const CPLStringList& aosArrowArrayStreamOptions);
 
     OGRArrowArrayHelper(GDALDataset* poDS,
                         OGRFeatureDefn* poFeatureDefn,
@@ -148,12 +151,12 @@ public:
         brokenDown.tm_year = ogrField.Date.Year - 1900;
         brokenDown.tm_mon = ogrField.Date.Month - 1;
         brokenDown.tm_mday = ogrField.Date.Day;
-        brokenDown.tm_hour = ogrField.Date.Hour;
-        brokenDown.tm_min = ogrField.Date.Minute;
-        brokenDown.tm_sec = static_cast<int>(ogrField.Date.Second);
+        brokenDown.tm_hour = 0;
+        brokenDown.tm_min = 0;
+        brokenDown.tm_sec = 0;
         static_cast<int32_t*>(const_cast<void*>(
             psArray->buffers[1]))[iFeat] =
-                static_cast<int>((CPLYMDHMSToUnixTime(&brokenDown) + 36200) / 86400);
+                static_cast<int>(CPLYMDHMSToUnixTime(&brokenDown) / 86400);
     }
 
     static
@@ -176,24 +179,25 @@ public:
     {
         auto psArray = m_out_array->children[iArrowField];
         auto panOffsets = static_cast<int32_t*>(const_cast<void*>(psArray->buffers[1]));
-        const int32_t nCurLength = panOffsets[iFeat];
-        if( nLen > anArrowFieldMaxAlloc[iArrowField] - static_cast<uint32_t>(nCurLength) )
+        const uint32_t nCurLength = static_cast<uint32_t>(panOffsets[iFeat]);
+        if( nLen > anArrowFieldMaxAlloc[iArrowField] - nCurLength )
         {
-            if( nLen > static_cast<uint32_t>(std::numeric_limits<int32_t>::max() - nCurLength) )
+            if( nLen > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) - nCurLength )
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "Too large geometry");
+                CPLError(CE_Failure, CPLE_AppDefined, "Too large string or binary content");
                 return nullptr;
             }
-            const int32_t nNewSize = std::max(
-                nCurLength + static_cast<int32_t>(nLen),
-                static_cast<int32_t>(
-                    std::min(
-                        static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
-                        static_cast<uint64_t>(anArrowFieldMaxAlloc[iArrowField] * 2))));
+            uint32_t nNewSize = nCurLength + static_cast<uint32_t>(nLen);
+            if( (anArrowFieldMaxAlloc[iArrowField] >> 31) == 0 )
+            {
+                const uint32_t nDoubleSize = 2U * anArrowFieldMaxAlloc[iArrowField];
+                if( nNewSize < nDoubleSize )
+                    nNewSize = nDoubleSize;
+            }
             void* newBuffer = VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nNewSize);
             if( newBuffer == nullptr )
                 return nullptr;
-            anArrowFieldMaxAlloc[iArrowField] = static_cast<uint32_t>(nNewSize);
+            anArrowFieldMaxAlloc[iArrowField] = nNewSize;
             memcpy(newBuffer, psArray->buffers[2], nCurLength);
             VSIFreeAligned(const_cast<void*>(psArray->buffers[2]));
             psArray->buffers[2] = newBuffer;

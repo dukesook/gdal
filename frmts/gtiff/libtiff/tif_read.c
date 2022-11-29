@@ -69,7 +69,7 @@ static int TIFFReadAndRealloc(TIFF* tif, tmsize_t size,
             uint64_t filesize = TIFFGetFileSize(tif);
             if((uint64_t)size >= filesize )
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                              "Chunk size requested is larger than file size.");
                 return 0;
             }
@@ -100,7 +100,7 @@ static int TIFFReadAndRealloc(TIFF* tif, tmsize_t size,
                 tif->tif_rawdatasize = (tmsize_t)TIFFroundup_64(
                         (uint64_t)already_read + to_read + rawdata_offset, 1024);
                 if (tif->tif_rawdatasize==0) {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                                 "Invalid buffer size");
                     return 0;
                 }
@@ -108,10 +108,10 @@ static int TIFFReadAndRealloc(TIFF* tif, tmsize_t size,
                                 tif->tif_rawdata, tif->tif_rawdatasize);
                 if( new_rawdata == 0 )
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                         "No space for data buffer at scanline %"PRIu32,
                         tif->tif_row);
-                    _TIFFfree(tif->tif_rawdata);
+                    _TIFFfreeExt(tif, tif->tif_rawdata);
                     tif->tif_rawdata = 0;
                     tif->tif_rawdatasize = 0;
                     return 0;
@@ -132,7 +132,7 @@ static int TIFFReadAndRealloc(TIFF* tif, tmsize_t size,
                         tif->tif_rawdatasize - rawdata_offset - already_read );
                 if( is_strip )
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                         "Read error at scanline %"PRIu32"; got %"TIFF_SSIZE_FORMAT" bytes, "
                         "expected %"TIFF_SSIZE_FORMAT,
                                         tif->tif_row,
@@ -141,7 +141,7 @@ static int TIFFReadAndRealloc(TIFF* tif, tmsize_t size,
                 }
                 else
                 {
-                    TIFFErrorExt(tif->tif_clientdata, module,
+                    TIFFErrorExtR(tif, module,
                         "Read error at row %"PRIu32", col %"PRIu32", tile %"PRIu32"; "
                         "got %"TIFF_SSIZE_FORMAT" bytes, expected %"TIFF_SSIZE_FORMAT"",
                                         tif->tif_row,
@@ -187,7 +187,7 @@ TIFFFillStripPartial( TIFF *tif, int strip, tmsize_t read_ahead, int restart )
                 
                 tif->tif_curstrip = NOSTRIP;
                 if ((tif->tif_flags & TIFF_MYBUFFER) == 0) {
-                        TIFFErrorExt(tif->tif_clientdata, module,
+                        TIFFErrorExtR(tif, module,
                                      "Data buffer too small to hold part of strip %d",
                                      strip);
                         return (0);
@@ -222,7 +222,7 @@ TIFFFillStripPartial( TIFF *tif, int strip, tmsize_t read_ahead, int restart )
                 + tif->tif_rawdataoff + tif->tif_rawdataloaded;
 
         if (!SeekOK(tif, read_offset)) {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                              "Seek error at scanline %"PRIu32", strip %d",
                              tif->tif_row, strip);
                 return 0;
@@ -314,7 +314,7 @@ TIFFSeek(TIFF* tif, uint32_t row, uint16_t sample )
         ** Establish what strip we are working from.
         */
 	if (row >= td->td_imagelength) {	/* out of range */
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+		TIFFErrorExtR(tif, tif->tif_name,
 		    "%"PRIu32": Row out of range, max %"PRIu32"",
 		    row,
 		    td->td_imagelength);
@@ -322,7 +322,7 @@ TIFFSeek(TIFF* tif, uint32_t row, uint16_t sample )
 	}
 	if (td->td_planarconfig == PLANARCONFIG_SEPARATE) {
 		if (sample >= td->td_samplesperpixel) {
-			TIFFErrorExt(tif->tif_clientdata, tif->tif_name,
+			TIFFErrorExtR(tif, tif->tif_name,
 			    "%"PRIu16": Sample out of range, max %"PRIu16"",
 			    sample, td->td_samplesperpixel);
 			return (0);
@@ -475,7 +475,7 @@ static tmsize_t TIFFReadEncodedStripGetStripSize(TIFF* tif, uint32_t strip, uint
 		return((tmsize_t)(-1));
 	if (strip>=td->td_nstrips)
 	{
-		TIFFErrorExt(tif->tif_clientdata,module,
+		TIFFErrorExtR(tif,module,
 		    "%"PRIu32": Strip out of range, max %"PRIu32, strip,
 		    td->td_nstrips);
 		return((tmsize_t)(-1));
@@ -540,7 +540,7 @@ TIFFReadEncodedStrip(TIFF* tif, uint32_t strip, void* buf, tmsize_t size)
 }
 
 /* Variant of TIFFReadEncodedStrip() that does 
- * * if *buf == NULL, *buf = _TIFFmalloc(bufsizetoalloc) only after TIFFFillStrip() has
+ * * if *buf == NULL, *buf = _TIFFmallocExt(tif, bufsizetoalloc) only after TIFFFillStrip() has
  *   succeeded. This avoid excessive memory allocation in case of truncated
  *   file.
  * * calls regular TIFFReadEncodedStrip() if *buf != NULL
@@ -567,9 +567,9 @@ _TIFFReadEncodedStripAndAllocBuffer(TIFF* tif, uint32_t strip,
     if (!TIFFFillStrip(tif,strip))
             return((tmsize_t)(-1));
 
-    *buf = _TIFFmalloc(bufsizetoalloc);
+    *buf = _TIFFmallocExt(tif, bufsizetoalloc);
     if (*buf == NULL) {
-            TIFFErrorExt(tif->tif_clientdata, TIFFFileName(tif), "No space for strip buffer");
+            TIFFErrorExtR(tif, TIFFFileName(tif), "No space for strip buffer");
             return((tmsize_t)(-1));
     }
     _TIFFmemset(*buf, 0, bufsizetoalloc);
@@ -591,14 +591,14 @@ TIFFReadRawStrip1(TIFF* tif, uint32_t strip, void* buf, tmsize_t size,
 		tmsize_t cc;
 
 		if (!SeekOK(tif, TIFFGetStrileOffset(tif, strip))) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 			    "Seek error at scanline %"PRIu32", strip %"PRIu32,
 			    tif->tif_row, strip);
 			return ((tmsize_t)(-1));
 		}
 		cc = TIFFReadFile(tif, buf, size);
 		if (cc != size) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 		"Read error at scanline %"PRIu32"; got %"TIFF_SSIZE_FORMAT" bytes, expected %"TIFF_SSIZE_FORMAT,
 				     tif->tif_row,
 				     cc,
@@ -626,7 +626,7 @@ TIFFReadRawStrip1(TIFF* tif, uint32_t strip, void* buf, tmsize_t size,
                             n=size;
                 }
 		if (n!=size) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 	"Read error at scanline %"PRIu32", strip %"PRIu32"; got %"TIFF_SSIZE_FORMAT" bytes, expected %"TIFF_SSIZE_FORMAT,
 				     tif->tif_row,
 				     strip,
@@ -650,14 +650,14 @@ TIFFReadRawStripOrTile2(TIFF* tif, uint32_t strip_or_tile, int is_strip,
         if (!SeekOK(tif, TIFFGetStrileOffset(tif, strip_or_tile))) {
             if( is_strip )
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                     "Seek error at scanline %"PRIu32", strip %"PRIu32,
                     tif->tif_row,
                     strip_or_tile);
             }
             else
             {
-                TIFFErrorExt(tif->tif_clientdata, module,
+                TIFFErrorExtR(tif, module,
                     "Seek error at row %"PRIu32", col %"PRIu32", tile %"PRIu32,
                     tif->tif_row,
                     tif->tif_col,
@@ -689,7 +689,7 @@ TIFFReadRawStrip(TIFF* tif, uint32_t strip, void* buf, tmsize_t size)
 	if (!TIFFCheckRead(tif, 0))
 		return ((tmsize_t)(-1));
 	if (strip >= td->td_nstrips) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		     "%"PRIu32": Strip out of range, max %"PRIu32,
 		     strip,
 		     td->td_nstrips);
@@ -697,7 +697,7 @@ TIFFReadRawStrip(TIFF* tif, uint32_t strip, void* buf, tmsize_t size)
 	}
 	if (tif->tif_flags&TIFF_NOREADRAW)
 	{
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "Compression scheme does not support access to raw uncompressed data");
 		return ((tmsize_t)(-1));
 	}
@@ -732,7 +732,7 @@ TIFFFillStrip(TIFF* tif, uint32_t strip)
 	{
 		uint64_t bytecount = TIFFGetStrileByteCount(tif, strip);
 		if( bytecount == 0 || bytecount > (uint64_t)TIFF_INT64_MAX ) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 				"Invalid strip byte count %"PRIu64", strip %"PRIu32,
 				     bytecount,
 				     strip);
@@ -751,7 +751,7 @@ TIFFFillStrip(TIFF* tif, uint32_t strip)
 			    (bytecount - 4096) / 10 > (uint64_t)stripsize  )
 			{
 				uint64_t newbytecount = (uint64_t)stripsize * 10 + 4096;
-				TIFFErrorExt(tif->tif_clientdata, module,
+				TIFFErrorExtR(tif, module,
 				  "Too large strip byte count %"PRIu64", strip %"PRIu32". Limiting to %"PRIu64,
 				     bytecount,
 				     strip,
@@ -777,7 +777,7 @@ TIFFFillStrip(TIFF* tif, uint32_t strip)
 				 * it's what would happen if a read were done
 				 * instead.
 				 */
-				TIFFErrorExt(tif->tif_clientdata, module,
+				TIFFErrorExtR(tif, module,
 
 					"Read error on strip %"PRIu32"; "
                     "got %"PRIu64" bytes, expected %"PRIu64,
@@ -804,7 +804,7 @@ TIFFFillStrip(TIFF* tif, uint32_t strip)
 			 * fault since the file is mapped read-only).
 			 */
 			if ((tif->tif_flags & TIFF_MYBUFFER) && tif->tif_rawdata) {
-				_TIFFfree(tif->tif_rawdata);
+				_TIFFfreeExt(tif, tif->tif_rawdata);
 				tif->tif_rawdata = NULL;
 				tif->tif_rawdatasize = 0;
 			}
@@ -831,13 +831,13 @@ TIFFFillStrip(TIFF* tif, uint32_t strip)
 			bytecountm=(tmsize_t)bytecount;
 			if ((uint64_t)bytecountm != bytecount)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Integer overflow");
+				TIFFErrorExtR(tif,module,"Integer overflow");
 				return(0);
 			}
 			if (bytecountm > tif->tif_rawdatasize) {
 				tif->tif_curstrip = NOSTRIP;
 				if ((tif->tif_flags & TIFF_MYBUFFER) == 0) {
-					TIFFErrorExt(tif->tif_clientdata, module,
+					TIFFErrorExtR(tif, module,
 					    "Data buffer too small to hold strip %"PRIu32,
 					    strip);
 					return (0);
@@ -916,7 +916,7 @@ TIFFReadEncodedTile(TIFF* tif, uint32_t tile, void* buf, tmsize_t size)
 	if (!TIFFCheckRead(tif, 1))
 		return ((tmsize_t)(-1));
 	if (tile >= td->td_nstrips) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "%"PRIu32": Tile out of range, max %"PRIu32,
 		    tile, td->td_nstrips);
 		return ((tmsize_t)(-1));
@@ -952,7 +952,7 @@ TIFFReadEncodedTile(TIFF* tif, uint32_t tile, void* buf, tmsize_t size)
 }
 
 /* Variant of TIFFReadTile() that does 
- * * if *buf == NULL, *buf = _TIFFmalloc(bufsizetoalloc) only after TIFFFillTile() has
+ * * if *buf == NULL, *buf = _TIFFmallocExt(tif, bufsizetoalloc) only after TIFFFillTile() has
  *   succeeded. This avoid excessive memory allocation in case of truncated
  *   file.
  * * calls regular TIFFReadEncodedTile() if *buf != NULL
@@ -971,7 +971,7 @@ _TIFFReadTileAndAllocBuffer(TIFF* tif,
 }
 
 /* Variant of TIFFReadEncodedTile() that does 
- * * if *buf == NULL, *buf = _TIFFmalloc(bufsizetoalloc) only after TIFFFillTile() has
+ * * if *buf == NULL, *buf = _TIFFmallocExt(tif, bufsizetoalloc) only after TIFFFillTile() has
  *   succeeded. This avoid excessive memory allocation in case of truncated
  *   file.
  * * calls regular TIFFReadEncodedTile() if *buf != NULL
@@ -993,7 +993,7 @@ _TIFFReadEncodedTileAndAllocBuffer(TIFF* tif, uint32_t tile,
     if (!TIFFCheckRead(tif, 1))
             return ((tmsize_t)(-1));
     if (tile >= td->td_nstrips) {
-            TIFFErrorExt(tif->tif_clientdata, module,
+            TIFFErrorExtR(tif, module,
                 "%"PRIu32": Tile out of range, max %"PRIu32,
                 tile, td->td_nstrips);
             return ((tmsize_t)(-1));
@@ -1002,9 +1002,49 @@ _TIFFReadEncodedTileAndAllocBuffer(TIFF* tif, uint32_t tile,
     if (!TIFFFillTile(tif,tile))
             return((tmsize_t)(-1));
 
-    *buf = _TIFFmalloc(bufsizetoalloc);
+    /* Sanity checks to avoid excessive memory allocation */
+    /* Cf https://gitlab.com/libtiff/libtiff/-/issues/479 */
+    if (td->td_compression == COMPRESSION_NONE) {
+        if (tif->tif_rawdatasize != tilesize) {
+            TIFFErrorExtR(tif, TIFFFileName(tif),
+                         "Invalid tile byte count for tile %u. "
+                         "Expected %"PRIu64", got %"PRIu64,
+                          tile,
+                          (uint64_t)tilesize,
+                          (uint64_t)tif->tif_rawdatasize);
+            return((tmsize_t)(-1));
+        }
+    }
+    else {
+        /* Max compression ratio experimentally determined. Might be fragile...
+         * Only apply this heuristics to situations where the memory allocation
+         * would be big, to avoid breaking nominal use cases.
+         */
+        const int maxCompressionRatio =
+            td->td_compression == COMPRESSION_ZSTD ?
+                33000 :
+            td->td_compression == COMPRESSION_JXL ?
+                /* Evaluated on a 8000x8000 tile */
+                25000 * (td->td_planarconfig == PLANARCONFIG_CONTIG ? td->td_samplesperpixel : 1) :
+            td->td_compression == COMPRESSION_LZMA ?
+                7000 :
+                1000;
+        if  (bufsizetoalloc > 100 * 1000 * 1000 &&
+             tif->tif_rawdatasize < tilesize / maxCompressionRatio) {
+            TIFFErrorExtR(tif, TIFFFileName(tif),
+                         "Likely invalid tile byte count for tile %u. "
+                         "Uncompressed tile size is %"PRIu64", "
+                         "compressed one is %"PRIu64,
+                          tile,
+                          (uint64_t)tilesize,
+                          (uint64_t)tif->tif_rawdatasize);
+            return((tmsize_t)(-1));
+        }
+    }
+
+    *buf = _TIFFmallocExt(tif, bufsizetoalloc);
     if (*buf == NULL) {
-            TIFFErrorExt(tif->tif_clientdata, TIFFFileName(tif),
+            TIFFErrorExtR(tif, TIFFFileName(tif),
                          "No space for tile buffer");
             return((tmsize_t)(-1));
     }
@@ -1030,7 +1070,7 @@ TIFFReadRawTile1(TIFF* tif, uint32_t tile, void* buf, tmsize_t size, const char*
 		tmsize_t cc;
 
 		if (!SeekOK(tif, TIFFGetStrileOffset(tif, tile))) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 			    "Seek error at row %"PRIu32", col %"PRIu32", tile %"PRIu32,
 			    tif->tif_row,
 			    tif->tif_col,
@@ -1039,7 +1079,7 @@ TIFFReadRawTile1(TIFF* tif, uint32_t tile, void* buf, tmsize_t size, const char*
 		}
 		cc = TIFFReadFile(tif, buf, size);
 		if (cc != size) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 	"Read error at row %"PRIu32", col %"PRIu32"; got %"TIFF_SSIZE_FORMAT" bytes, expected %"TIFF_SSIZE_FORMAT,
 				     tif->tif_row,
 				     tif->tif_col,
@@ -1059,7 +1099,7 @@ TIFFReadRawTile1(TIFF* tif, uint32_t tile, void* buf, tmsize_t size, const char*
 		else
 			n=size;
 		if (n!=size) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 "Read error at row %"PRIu32", col %"PRIu32", tile %"PRIu32"; got %"TIFF_SSIZE_FORMAT" bytes, expected %"TIFF_SSIZE_FORMAT,
 				     tif->tif_row,
 				     tif->tif_col,
@@ -1087,14 +1127,14 @@ TIFFReadRawTile(TIFF* tif, uint32_t tile, void* buf, tmsize_t size)
 	if (!TIFFCheckRead(tif, 1))
 		return ((tmsize_t)(-1));
 	if (tile >= td->td_nstrips) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "%"PRIu32": Tile out of range, max %"PRIu32,
 		    tile, td->td_nstrips);
 		return ((tmsize_t)(-1));
 	}
 	if (tif->tif_flags&TIFF_NOREADRAW)
 	{
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		"Compression scheme does not support access to raw uncompressed data");
 		return ((tmsize_t)(-1));
 	}
@@ -1123,7 +1163,7 @@ TIFFFillTile(TIFF* tif, uint32_t tile)
 	{
 		uint64_t bytecount = TIFFGetStrileByteCount(tif, tile);
 		if( bytecount == 0 || bytecount > (uint64_t)TIFF_INT64_MAX ) {
-			TIFFErrorExt(tif->tif_clientdata, module,
+			TIFFErrorExtR(tif, module,
 				"%"PRIu64": Invalid tile byte count, tile %"PRIu32,
 				     bytecount,
 				     tile);
@@ -1142,7 +1182,7 @@ TIFFFillTile(TIFF* tif, uint32_t tile)
 			    (bytecount - 4096) / 10 > (uint64_t)stripsize  )
 			{
 				uint64_t newbytecount = (uint64_t)stripsize * 10 + 4096;
-				TIFFErrorExt(tif->tif_clientdata, module,
+				TIFFErrorExtR(tif, module,
 				  "Too large tile byte count %"PRIu64", tile %"PRIu32". Limiting to %"PRIu64,
 				     bytecount,
 				     tile,
@@ -1183,7 +1223,7 @@ TIFFFillTile(TIFF* tif, uint32_t tile)
 			 * fault since the file is mapped read-only).
 			 */
 			if ((tif->tif_flags & TIFF_MYBUFFER) && tif->tif_rawdata) {
-				_TIFFfree(tif->tif_rawdata);
+				_TIFFfreeExt(tif, tif->tif_rawdata);
 				tif->tif_rawdata = NULL;
 				tif->tif_rawdatasize = 0;
 			}
@@ -1205,13 +1245,13 @@ TIFFFillTile(TIFF* tif, uint32_t tile)
 			bytecountm=(tmsize_t)bytecount;
 			if ((uint64_t)bytecountm != bytecount)
 			{
-				TIFFErrorExt(tif->tif_clientdata,module,"Integer overflow");
+				TIFFErrorExtR(tif,module,"Integer overflow");
 				return(0);
 			}
 			if (bytecountm > tif->tif_rawdatasize) {
 				tif->tif_curtile = NOTILE;
 				if ((tif->tif_flags & TIFF_MYBUFFER) == 0) {
-					TIFFErrorExt(tif->tif_clientdata, module,
+					TIFFErrorExtR(tif, module,
 					    "Data buffer too small to hold tile %"PRIu32,
 					    tile);
 					return (0);
@@ -1279,7 +1319,7 @@ TIFFReadBufferSetup(TIFF* tif, void* bp, tmsize_t size)
 
 	if (tif->tif_rawdata) {
 		if (tif->tif_flags & TIFF_MYBUFFER)
-			_TIFFfree(tif->tif_rawdata);
+			_TIFFfreeExt(tif, tif->tif_rawdata);
 		tif->tif_rawdata = NULL;
 		tif->tif_rawdatasize = 0;
 	}
@@ -1290,17 +1330,17 @@ TIFFReadBufferSetup(TIFF* tif, void* bp, tmsize_t size)
 	} else {
 		tif->tif_rawdatasize = (tmsize_t)TIFFroundup_64((uint64_t)size, 1024);
 		if (tif->tif_rawdatasize==0) {
-		    TIFFErrorExt(tif->tif_clientdata, module,
+		    TIFFErrorExtR(tif, module,
 				 "Invalid buffer size");
 		    return (0);
 		}
 		/* Initialize to zero to avoid uninitialized buffers in case of */
                 /* short reads (http://bugzilla.maptools.org/show_bug.cgi?id=2651) */
-		tif->tif_rawdata = (uint8_t*) _TIFFcalloc(1, tif->tif_rawdatasize);
+		tif->tif_rawdata = (uint8_t*) _TIFFcallocExt(tif, 1, tif->tif_rawdatasize);
 		tif->tif_flags |= TIFF_MYBUFFER;
 	}
 	if (tif->tif_rawdata == NULL) {
-		TIFFErrorExt(tif->tif_clientdata, module,
+		TIFFErrorExtR(tif, module,
 		    "No space for data buffer at scanline %"PRIu32,
 		    tif->tif_row);
 		tif->tif_rawdatasize = 0;
@@ -1371,13 +1411,13 @@ TIFFStartTile(TIFF* tif, uint32_t tile)
 	tif->tif_curtile = tile;
         howmany32=TIFFhowmany_32(td->td_imagewidth, td->td_tilewidth);
         if (howmany32 == 0) {
-                 TIFFErrorExt(tif->tif_clientdata,module,"Zero tiles");
+                 TIFFErrorExtR(tif,module,"Zero tiles");
                 return 0;
         }
 	tif->tif_row = (tile % howmany32) * td->td_tilelength;
         howmany32=TIFFhowmany_32(td->td_imagelength, td->td_tilelength);
         if (howmany32 == 0) {
-                TIFFErrorExt(tif->tif_clientdata,module,"Zero tiles");
+                TIFFErrorExtR(tif,module,"Zero tiles");
                 return 0;
         }
 	tif->tif_col = (tile % howmany32) * td->td_tilewidth;
@@ -1403,11 +1443,11 @@ static int
 TIFFCheckRead(TIFF* tif, int tiles)
 {
 	if (tif->tif_mode == O_WRONLY) {
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name, "File not open for reading");
+		TIFFErrorExtR(tif, tif->tif_name, "File not open for reading");
 		return (0);
 	}
 	if (tiles ^ isTiled(tif)) {
-		TIFFErrorExt(tif->tif_clientdata, tif->tif_name, tiles ?
+		TIFFErrorExtR(tif, tif->tif_name, tiles ?
 		    "Can not read tiles from a striped image" :
 		    "Can not read scanlines from a tiled image");
 		return (0);
@@ -1436,12 +1476,12 @@ int      TIFFReadFromUserBuffer(TIFF* tif, uint32_t strile,
     void* old_rawdata = tif->tif_rawdata;
 
     if (tif->tif_mode == O_WRONLY) {
-        TIFFErrorExt(tif->tif_clientdata, tif->tif_name, "File not open for reading");
+        TIFFErrorExtR(tif, tif->tif_name, "File not open for reading");
         return 0;
     }
     if (tif->tif_flags&TIFF_NOREADRAW)
     {
-        TIFFErrorExt(tif->tif_clientdata, module,
+        TIFFErrorExtR(tif, module,
                 "Compression scheme does not support access to raw uncompressed data");
         return 0;
     }

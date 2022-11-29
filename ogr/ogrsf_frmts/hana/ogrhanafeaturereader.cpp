@@ -34,11 +34,11 @@
 #include <algorithm>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <sstream>
 
 #include "odbc/Types.h"
 
-CPL_CVSID("$Id$")
 
 namespace OGRHANA {
 namespace {

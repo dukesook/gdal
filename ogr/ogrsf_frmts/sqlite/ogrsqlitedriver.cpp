@@ -49,7 +49,6 @@
 #include "ogr_core.h"
 #include "sqlite3.h"
 
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                     OGRSQLiteDriverIdentify()                        */
@@ -301,6 +300,7 @@ void RegisterOGRSQLite()
     poDriver->SetMetadataItem( GDAL_DCAP_CURVE_GEOMETRIES, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_MEASURED_GEOMETRIES, "YES" );
     poDriver->SetMetadataItem( GDAL_DCAP_Z_GEOMETRIES, "YES" );
+    poDriver->SetMetadataItem( GDAL_DMD_SUPPORTED_SQL_DIALECTS, "SQLITE OGRSQL" );
 
 #ifdef HAVE_RASTERLITE2
     poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
@@ -406,7 +406,7 @@ void RegisterOGRSQLite()
 
 #ifdef HAVE_RASTERLITE2
     poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES,
-                               "Byte UInt16 Int16 UInt32 Int32 Float32 "
+                               "Byte Int8 UInt16 Int16 UInt32 Int32 Float32 "
                                "Float64" );
 #endif
     poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_FIELDS, "YES" );

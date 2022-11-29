@@ -36,6 +36,8 @@ import pytest
 
 from osgeo import gdal, osr
 
+pytestmark = pytest.mark.require_driver("PDS")
+
 ###############################################################################
 # Read a truncated and modified version of http://download.osgeo.org/gdal/data/pds/mc02.img
 
@@ -377,7 +379,7 @@ def test_pds_oblique_cylindrical_read():
     srs = ds.GetSpatialRef()
     assert (
         srs.ExportToProj4()
-        == "+proj=ob_tran +R=2575000 +o_proj=eqc +o_lon_p=-257.744003 +o_lat_p=120.374532 +lon_0=-303.571748 +wktext +no_defs"
+        == "+proj=ob_tran +o_proj=eqc +o_lon_p=-257.744003 +o_lat_p=120.374532 +lon_0=-303.571748 +R=2575000 +units=m +no_defs"
     )
     gt = ds.GetGeoTransform()
     assert gt == pytest.approx(

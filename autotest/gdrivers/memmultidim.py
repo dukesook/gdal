@@ -60,6 +60,18 @@ def test_mem_md_basic():
     assert not rg.GetAttribute("not existing")
     assert not rg.GetVectorLayerNames()
     assert not rg.OpenVectorLayer("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.OpenMDArray("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.OpenMDArrayFromFullname("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.OpenGroup("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.OpenGroupFromFullname("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.GetAttribute("not existing")
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.OpenVectorLayer("not existing")
 
 
 def test_mem_md_subgroup():
@@ -91,6 +103,8 @@ def test_mem_md_subgroup():
     array = rg.OpenMDArrayFromFullname("/subgroup/myarray")
     assert array is not None
     assert array.GetFullName() == "/subgroup/myarray"
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        array.GetAttribute("not existing")
 
     copy_ds = drv.CreateCopy("", ds)
     assert copy_ds
@@ -214,6 +228,7 @@ def test_mem_md_array_single_dim():
     # Test writing a array
     for typecode, in_ar, out_tuple in [
         ("B", [1, 2], (1, 2)),
+        ("b", [-128, 127], (0, 127)),
         ("h", [-32768, 32767], (0, 255)),
         ("H", [0, 65535], (0, 255)),
         ("i", [-(1 << 31), (1 << 31) - 1], (0, 255)),
@@ -223,10 +238,6 @@ def test_mem_md_array_single_dim():
     ]:
         assert myarray.Write(array.array(typecode, in_ar)) == gdal.CE_None
         assert struct.unpack("B" * 2, myarray.Read()) == out_tuple
-
-    # Unsupported array type
-    with pytest.raises(Exception):
-        myarray.Write(array.array("b", [1, 2]))
 
     assert myarray.AdviseRead() == gdal.CE_None
 
@@ -2103,6 +2114,8 @@ def test_mem_md_array_resolvemdarray():
     b.CreateMDArray("var_c", [], gdal.ExtendedDataType.Create(gdal.GDT_Int16))
 
     assert rg.ResolveMDArray("x", "/") is None
+    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+        rg.ResolveMDArray("x", "/")
 
     assert rg.ResolveMDArray("/a/var_a", "/").GetFullName() == "/a/var_a"
     assert rg.ResolveMDArray("var_a", "/").GetFullName() == "/a/var_a"
