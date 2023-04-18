@@ -81,8 +81,15 @@ class GDALHEIFDataset final : public GDALPamDataset
     GDALHEIFDataset();
     ~GDALHEIFDataset();
 
-    static int Identify(GDALOpenInfo *poOpenInfo);
-    static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
+        static int Identify(GDALOpenInfo* poOpenInfo);
+        static GDALDataset* Open(GDALOpenInfo* poOpenInfo);
+        static GDALDataset *CreateCopy( const char *pszFilename,
+                                GDALDataset *poSrcDS,
+                                int bStrict, char ** papszOptions,
+                                GDALProgressFunc pfnProgress,
+                                void *pProgressData );
+        virtual void FlushCache(bool bAtClosing) override;
+        
 };
 
 /************************************************************************/
@@ -381,6 +388,406 @@ bool GDALHEIFDataset::Init(GDALOpenInfo *poOpenInfo)
     return true;
 }
 
+
+
+/************************************************************************/
+/*                              CreateCopy()                            */
+/************************************************************************/
+
+static void print_item(GDALDataset *poSrcDS, const char* key, const char* domain) {
+    const char* value = poSrcDS->GetMetadataItem(key, domain);
+    if (value != nullptr) {
+        size_t length = strlen(value);
+        if (length != 0)
+            printf("\t\t%s: %s\n", key, value);
+
+    } else {
+        printf("\t\tKey %s not found\n", key);
+    }
+}
+static void print_metadata(GDALDataset *poSrcDS) {
+    char** domain_list = poSrcDS->GetMetadataDomainList();
+
+    printf("\nDOMAIN LIST:\n");
+    int i = 1;
+    while (*domain_list != NULL) {
+        printf("\t%d. %s\n", i++, *domain_list);
+        char** metadata = poSrcDS->GetMetadata(*domain_list);
+        int j = 1;
+        while (*metadata != NULL) {
+            std::string s_metadata = *metadata;
+            size_t equal_sign_index = s_metadata.find('=', 1);
+            if (equal_sign_index != std::string::npos) {
+                std::string key = s_metadata.substr(0, equal_sign_index);
+                print_item(poSrcDS, key.c_str(), *domain_list);
+            } else {
+                printf("\t\t%d. %s\n", j++, *metadata);
+            }
+            metadata++;
+        }
+        domain_list++;
+    }
+    printf("END DOMAIN LIST\n\n");
+}
+static std::string extract_metadata_key(std::string metadata) {
+    
+    //metadata is given as "NITF_Key=Value"
+    std::string key;
+    
+    //Remove Prefix
+    size_t prefix_index = metadata.find("NITF_");
+    if (prefix_index == 0) { //Key has the NITF_ prefix
+        metadata = metadata.substr(5);
+    }
+
+    size_t equal_sign_index = metadata.find('='); //Index of the first '='
+
+    if (equal_sign_index != std::string::npos) {
+        key = metadata.substr(0, equal_sign_index);
+    }
+
+    return key;
+
+}
+static std::string extract_metadata_value(std::string metadata) {
+    
+    //metadata is given as "NITF_Key=Value"
+    std::string value;
+    size_t equal_sign_index = metadata.find('='); //Index of the first '='
+    size_t value_index = equal_sign_index + 1;
+    value = metadata.substr(value_index);
+
+    return value;
+}
+static void copy_metadata(GDALDataset *poSrcDS, GDALDataset* destination) {
+
+    char** domain_list = poSrcDS->GetMetadataDomainList();
+
+    for (; *domain_list != NULL; domain_list++) {
+        char** metadata = poSrcDS->GetMetadata(*domain_list);
+        printf("%s\n", *domain_list);
+
+        for ( ; *metadata != NULL; metadata++) {
+            std::string key = extract_metadata_key(*metadata);
+            std::string value = extract_metadata_value(*metadata);
+            // printf("\t%s\n", *metadata);
+            if (!value.empty()) {
+                printf("\t%s - %s\n", key.c_str(), value.c_str());
+                destination->SetMetadataItem(key.c_str(), value.c_str(), *domain_list);
+            }
+            // print_item(poSrcDS, key.c_str(), *domain_list);
+        }
+    }
+
+    destination->GetBands(); //delete
+
+
+}
+static heif_image* get_band(GDALRasterBand* band) {
+
+    // GDALRasterBand* band = poSrcDS->GetRasterBand(1);
+
+    const int nXSize = band->GetXSize();
+    const int nYSize = band->GetYSize();
+    // const int nXSize = poSrcDS->GetRasterXSize(); //Image Pixel Width
+    // const int nYSize = poSrcDS->GetRasterYSize(); //Image Pixel Height
+    enum heif_colorspace colorspace = heif_colorspace_monochrome;
+    enum heif_chroma chroma = heif_chroma_monochrome;
+    enum heif_channel channel = heif_channel_Y;
+
+    heif_image* output_image;
+    heif_error error = heif_image_create(nXSize, nYSize, colorspace, chroma, &output_image);
+    if (error.code) {
+        printf("heif_image_create() error: %s\n", error.message);
+    }
+
+    GDALDataType eDT = band->GetRasterDataType();
+    // GDALDataType eDT = poSrcDS->GetRasterBand(1)->GetRasterDataType();
+    int bit_depth = 8;
+    switch (eDT) {
+        case GDT_Byte:
+            bit_depth = 8; break;
+        case GDT_UInt16:
+            bit_depth = 16; break;
+        case GDT_Int16:
+            bit_depth = 8; break;
+        case GDT_UInt32:
+            bit_depth = 32; break;
+        case GDT_Int32:
+            bit_depth = 32; break;
+        case GDT_UInt64:
+            bit_depth = 64; break;
+        case GDT_Int64:
+            bit_depth = 64; break;
+        case GDT_Float32:
+            bit_depth = 32; break;
+        case GDT_Float64:
+            bit_depth = 64; break;
+        case GDT_CInt16:
+            bit_depth = 16; break;
+        case GDT_CInt32:
+            bit_depth = 32; break;
+        case GDT_CFloat32:
+            bit_depth = 23; break;
+        case GDT_CFloat64:
+            bit_depth = 64; break;
+        case GDT_TypeCount:
+            bit_depth = 8; break; //?
+        case GDT_Unknown:
+            bit_depth = 8; break;
+    }
+    if (eDT != GDT_Byte) {
+        printf("WARNING! - Band is NOT 8-bit unsigned integer\n");
+        printf(" eDT: %d\n", eDT);
+    }
+    heif_image_add_plane(output_image, channel, nXSize, nYSize, bit_depth);
+
+    int stride = 0;
+    uint8_t* data = heif_image_get_plane(output_image, channel, &stride);
+
+    const int nBands = 1;
+    const int nWorkDTSize = GDALGetDataTypeSizeBytes(eDT);
+    size_t data_size = nBands * nXSize * nWorkDTSize;
+    GByte* pData =  static_cast<GByte *>(CPLMalloc(data_size));
+    GSpacing nPixelSpace = nBands * nWorkDTSize; //you can use 0 to default to eBufType
+    GSpacing nLineSpace = nBands * nXSize * nWorkDTSize; //Can be 0 to use default value
+    GSpacing nBandSpace = nWorkDTSize;
+    GDALRasterIOExtraArg* psExtraArg = nullptr;
+
+    nPixelSpace = nWorkDTSize; //Bytes / pixel
+    nLineSpace = nXSize * nWorkDTSize;
+
+    for (uint32_t iLine = 0; iLine < nYSize; iLine++) {
+        CPLErr eErr = band->RasterIO(
+            GF_Read,        //Read Data
+            0,              //X Pixel Offset
+            iLine,          //Y Pixel Offset
+            nXSize,         //Image Pixel Width
+            1,              //Image Pixel Height - copy 1 line at a time
+            pData,          //Output Data
+            nXSize,         //Image Pixel Width
+            1,              //Image Pixel Height - copy 1 line at a time
+            eDT,            //Bytes / Pixel - enum    
+            nPixelSpace,    //Bytes / Pixel - int
+            nLineSpace,     //Bytes / row
+            psExtraArg);    
+
+        if (eErr != CE_None) {
+            printf("ERROR: %d\n", eErr);
+        }
+
+        const uint64_t TOTAL_BYTE_COUNT = nXSize * nYSize;
+        //Write Pixels
+        for (uint32_t i = 0; i < nLineSpace; i++) {
+            int source_index = i + (iLine * nLineSpace);
+            data[source_index] = pData[i];
+        }
+    }
+
+    // Create the dataset.
+    // VSILFILE *fpImage = nullptr;
+    // fpImage = VSIFOpenL(pszFilename, "wb");
+    // if( fpImage == nullptr )
+    // {
+    //     CPLError(CE_Failure, CPLE_OpenFailed,
+    //              "Unable to create heif file %s.\n",
+    //              pszFilename);
+    //     return nullptr;
+    // }
+
+    // //Encode Image
+    // heif_encoder* encoder;
+    // heif_image_handle* handle;
+    // heif_context* context = heif_context_alloc(); //You need a separate context
+    // heif_context_get_encoder_for_format(context, heif_compression_HEVC, &encoder);
+    // heif_context_encode_image(context, output_image, encoder, nullptr, &handle);
+
+    // //Write Image
+    // heif_context_write_to_file(context, pszFilename);
+    // printf("Created: %s\n", pszFilename);
+
+    return output_image;
+
+}
+
+GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
+                        GDALDataset *poSrcDS,
+                        int bStrict, char ** papszOptions,
+                        GDALProgressFunc pfnProgress,
+                        void *pProgressData )
+{
+
+
+    // Create the dataset.
+    VSILFILE *fpImage = nullptr;
+    fpImage = VSIFOpenL(pszFilename, "wb");
+    if( fpImage == nullptr )
+    {
+        CPLError(CE_Failure, CPLE_OpenFailed,
+                 "Unable to create heif file %s.\n",
+                 pszFilename);
+        return nullptr;
+    }
+
+    const int nXSize = poSrcDS->GetRasterXSize(); //Image Pixel Width
+    const int nYSize = poSrcDS->GetRasterYSize(); //Image Pixel Height
+
+    const int nBands = poSrcDS->GetRasterCount();
+    enum heif_colorspace colorspace = heif_colorspace_RGB;
+    enum heif_chroma chroma = heif_chroma_interleaved_RGB;
+    enum heif_channel channel = heif_channel_interleaved;
+
+    if (nBands == 1) {
+        printf("monochrome!\n");
+        colorspace = heif_colorspace_monochrome;
+        chroma = heif_chroma_monochrome;
+        channel = heif_channel_Y;
+    }
+
+
+    heif_image* output_image;
+    heif_error error = heif_image_create(nXSize, nYSize, colorspace, chroma, &output_image);
+    if (error.code) {
+        printf("heif_image_create() error: %s\n", error.message);
+    }
+
+
+    GDALDataType eDT = poSrcDS->GetRasterBand(1)->GetRasterDataType();
+    int bit_depth = 8;
+    switch (eDT) {
+        case GDT_Byte:
+            bit_depth = 8; break;
+        case GDT_UInt16:
+            bit_depth = 16; break;
+        case GDT_Int16:
+            bit_depth = 16; break;
+        case GDT_UInt32:
+            bit_depth = 32; break;
+        case GDT_Int32:
+            bit_depth = 32; break;
+        case GDT_UInt64:
+            bit_depth = 64; break;
+        case GDT_Int64:
+            bit_depth = 64; break;
+        case GDT_Float32:
+            bit_depth = 32; break;
+        case GDT_Float64:
+            bit_depth = 64; break;
+        case GDT_CInt16:
+            bit_depth = 16; break;
+        case GDT_CInt32:
+            bit_depth = 32; break;
+        case GDT_CFloat32:
+            bit_depth = 23; break;
+        case GDT_CFloat64:
+            bit_depth = 64; break;
+        case GDT_TypeCount:
+            bit_depth = 8; break; //?
+        case GDT_Unknown:
+            bit_depth = 8; break;
+    }
+    if (eDT != GDT_Byte) {
+        printf("WARNING! - Input image is not 8-bit unsigned integer\n");
+        printf("eDT: %d,   bit_depth: %d\n", eDT, bit_depth);
+    }
+    heif_image_add_plane(output_image, channel, nXSize, nYSize, bit_depth);
+
+    int stride = 0;
+    uint8_t* data = heif_image_get_plane(output_image, channel, &stride);
+
+    //NITF File
+    //GDALDataset *poSrcDS
+    Bands bands = poSrcDS->GetBands();
+    printf("Band Count: %lu\n", bands.size());
+
+
+    const int nWorkDTSize = GDALGetDataTypeSizeBytes(eDT);
+    size_t data_size = nBands * nXSize * nWorkDTSize;
+    GByte* pData =  static_cast<GByte *>(CPLMalloc(data_size));
+    GSpacing nPixelSpace = nBands * nWorkDTSize; //you can use 0 to default to eBufType
+    GSpacing nLineSpace = nBands * nXSize * nWorkDTSize; //Can be 0 to use default value
+    GSpacing nBandSpace = nWorkDTSize;
+    GDALRasterIOExtraArg* psExtraArg = nullptr;
+
+    CPLErr eErr = CE_None;
+
+    heif_encoder* encoder;
+    heif_image_handle* handle;
+    heif_context* context = heif_context_alloc(); //You need a separate context
+    heif_context_get_encoder_for_format(context, heif_compression_HEVC, &encoder);
+    if (nBands == 3) {
+        for (int iLine = 0; iLine < nYSize; iLine++) {
+            eErr = poSrcDS->RasterIO( 
+                GF_Read,        //Read as opposed to write
+                0,              //x pixel offset - start at the beginning of each row
+                iLine,          //y pixel offset - row number
+                nXSize,         //Image Pixel Width
+                1,              //Row thickness - Copy 1 row at a time
+                pData,          //Output data
+                nXSize,         //
+                1,              //Row thickness - Copy 1 row at a time
+                eDT,            //Number of Bytes in a Pixel
+                nBands,         //band count
+                nullptr,        //order bands
+                nPixelSpace,    //Bytes / pixel
+                nLineSpace,     //Bytes / row
+                nBandSpace,
+                psExtraArg);
+
+            if (eErr != CE_None) {
+                printf("ERROR: %d\n", eErr);
+                break;
+            }
+
+            //Write Pixels
+
+            // uint32_t byte_width = nXSize * nBands;
+            for (uint32_t i = 0; i < nLineSpace; i++) {
+                int source_index = i + (iLine * nLineSpace);
+                data[source_index] = pData[i];
+            }
+        }
+
+        //Encode Image
+        heif_context_encode_image(context, output_image, encoder, nullptr, &handle);
+
+    } else {
+        //Monochrome or Multispectral or Hyperspectral
+        char filename[512];
+        for (int i = 1; i <= nBands; i++) {
+            GDALRasterBand* band = poSrcDS->GetRasterBand(i);
+            sprintf(filename, "%s%d.heic", pszFilename, i);
+            heif_image* img = get_band(band);
+            error = heif_context_encode_image(context, img, encoder, nullptr, &handle);
+        }
+    }
+
+    heif_context_write_to_file(context, pszFilename);
+    printf("Created: %s\n", pszFilename);
+
+    //dukesook dump
+    GDALHEIFDataset *poHEIF_DS = new GDALHEIFDataset();
+    poHEIF_DS->nRasterXSize = nXSize;
+    poHEIF_DS->nRasterYSize = nYSize;
+    // poHEIF_DS->nPamFlags |= GPF_DIRTY; // .pam file needs to be written on close
+
+    poHEIF_DS->psPam = new GDALDatasetPamInfo(); //can't be null for xml metadata
+    poHEIF_DS->psPam->bHasMetadata = true;
+
+    // print_metadata(poSrcDS);
+    copy_metadata(poSrcDS, poHEIF_DS);
+
+    heif_context_get_primary_image_handle(context, &handle);
+    poHEIF_DS->m_hImageHandle = handle;
+    for (int i = 0; i < nBands; i++) {
+        GDALRasterBand* newBand = new GDALHEIFRasterBand(poHEIF_DS, i+1);
+
+        poHEIF_DS->SetBand(i+1, newBand);
+    }
+
+    return poHEIF_DS;
+}
+
 /************************************************************************/
 /*                         ReadMetadata()                               */
 /************************************************************************/
@@ -509,6 +916,26 @@ void GDALHEIFDataset::ReadMetadata()
             }
         }
     }
+}
+
+/************************************************************************/
+/*                           FlushCache(bool bAtClosing)                               */
+/************************************************************************/
+
+void GDALHEIFDataset::FlushCache(bool bAtClosing)
+
+{
+    printf("heifdataset.cpp - FlushCache()\n");
+    GDALPamDataset::FlushCache(bAtClosing);
+
+    // if (bHasDoneJpegStartDecompress)
+    // {
+    //     Restart();
+    // }
+
+    // For the needs of the implicit JPEG-in-TIFF overview mechanism.
+    // for(int i = 0; i < nInternalOverviewsCurrent; i++)
+        // papoInternalOverviews[i]->FlushCache(bAtClosing);
 }
 
 /************************************************************************/
@@ -716,6 +1143,7 @@ void GDALRegister_HEIF()
 
     poDriver->pfnOpen = GDALHEIFDataset::Open;
     poDriver->pfnIdentify = GDALHEIFDataset::Identify;
+    poDriver->pfnCreateCopy = GDALHEIFDataset::CreateCopy;
 
     poDriver->SetMetadataItem("LIBHEIF_VERSION", LIBHEIF_VERSION);
 
