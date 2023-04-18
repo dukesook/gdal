@@ -88,7 +88,7 @@ class GDALHEIFDataset final : public GDALPamDataset
                                 int bStrict, char ** papszOptions,
                                 GDALProgressFunc pfnProgress,
                                 void *pProgressData );
-        virtual void FlushCache(bool bAtClosing) override;
+        virtual CPLErr FlushCache(bool bAtClosing) override;
         
 };
 
@@ -922,12 +922,12 @@ void GDALHEIFDataset::ReadMetadata()
 /*                           FlushCache(bool bAtClosing)                               */
 /************************************************************************/
 
-void GDALHEIFDataset::FlushCache(bool bAtClosing)
+CPLErr GDALHEIFDataset::FlushCache(bool bAtClosing)
 
 {
     printf("heifdataset.cpp - FlushCache()\n");
     GDALPamDataset::FlushCache(bAtClosing);
-
+    return CE_None;
     // if (bHasDoneJpegStartDecompress)
     // {
     //     Restart();
