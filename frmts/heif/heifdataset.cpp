@@ -714,7 +714,17 @@ GDALDataset * GDALHEIFDataset::CreateCopy( const char *pszFilename,
     heif_encoder* encoder;
     heif_image_handle* handle;
     heif_context* context = heif_context_alloc(); //You need a separate context
-    heif_context_get_encoder_for_format(context, heif_compression_HEVC, &encoder);
+    heif_compression_format compression = heif_compression_HEVC;
+    const char *codec = CSLFetchNameValue(papszOptions, "codec");
+    if (codec != nullptr) {
+        if (!strcmp(codec, "j2k")) {
+            // compression = JPEG2000; //TODO: update libheif
+            printf("codec: %s\n", codec);
+        }
+    } else {
+        printf("codec is null\n");
+    }
+    heif_context_get_encoder_for_format(context, compression, &encoder);
     if (nBands == 3) {
         for (int iLine = 0; iLine < nYSize; iLine++) {
             eErr = poSrcDS->RasterIO( 
