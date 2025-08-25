@@ -135,6 +135,149 @@ heif_error GDALHEIFDataset::VFS_WriterCallback(struct heif_context *,
     return result;
 }
 
+heif_error encodeRGBImage(GDALDataset *poSrcDS, heif_context *ctx,
+                          heif_encoder *encoder)
+{
+    heif_image *image;
+
+    heif_error err =
+        heif_image_create(poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
+                          heif_colorspace_RGB, heif_chroma_444, &image);
+    if (err.code)
+    {
+        heif_context_free(ctx);
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to create libheif input image.\n");
+        return err;
+    }
+
+    for (auto &&poBand : poSrcDS->GetBands())
+    {
+        if (poBand->GetRasterDataType() != GDT_Byte)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            CPLError(CE_Failure, CPLE_AppDefined, "Unsupported data type.");
+            return err;
+        }
+        heif_channel channel;
+        auto mapError =
+            mapColourInterpretation(poBand->GetColorInterpretation(), &channel);
+        if (mapError != CE_None)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "Driver does not support bands other than RGBA yet.");
+            return err;
+        }
+        err = heif_image_add_plane(image, channel, poSrcDS->GetRasterXSize(),
+                                   poSrcDS->GetRasterYSize(), 8);
+        if (err.code)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to add image plane to libheif input image.");
+            return err;
+        }
+        int stride;
+        uint8_t *p = heif_image_get_plane(image, channel, &stride);
+        auto eErr = poBand->RasterIO(
+            GF_Read, 0, 0, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
+            p, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(), GDT_Byte,
+            0, stride, nullptr);
+
+        if (eErr != CE_None)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            return err;
+        }
+    }
+
+    // TODO: set options based on creation options
+    heif_encoding_options *encoding_options = nullptr;
+
+    heif_image_handle *out_image_handle;
+
+    heif_context_encode_image(ctx, image, encoder, encoding_options,
+                              &out_image_handle);
+
+    heif_image_release(image);
+
+    heif_image_handle_release(out_image_handle);
+    heif_encoding_options_free(encoding_options);
+
+    return err;
+}
+
+heif_error encodeEachBandAsGray(GDALDataset *poSrcDS, heif_context *ctx,
+                                heif_encoder *encoder)
+{
+    int width = poSrcDS->GetRasterXSize();
+    int height = poSrcDS->GetRasterYSize();
+    heif_channel channel = heif_channel_Y;
+    heif_error err;
+    for (auto &&poBand : poSrcDS->GetBands())
+    {
+        heif_image *image;
+        GDALDataType gdalType = poBand->GetRasterDataType();
+        int bitDepth = GDALGetDataTypeSizeBits(gdalType);
+
+        err = heif_image_create(
+            poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
+            heif_colorspace_monochrome, heif_chroma_monochrome, &image);
+        if (err.code)
+        {
+            heif_context_free(ctx);
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to create libheif input image.\n");
+            return err;
+        }
+
+        err = heif_image_add_plane(image, channel, width, height, bitDepth);
+        if (err.code)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to add image plane to libheif input image.");
+            return err;
+        }
+
+        int stride;
+        uint8_t *p = heif_image_get_plane(image, channel, &stride);
+        auto eErr = poBand->RasterIO(
+            GF_Read, 0, 0, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
+            p, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(), gdalType,
+            0, stride, nullptr);
+
+        if (eErr != CE_None)
+        {
+            heif_image_release(image);
+            heif_context_free(ctx);
+            return {heif_error_Usage_error, heif_suberror_Unspecified,
+                    "Failed to read from source dataset."};
+        }
+
+        // TODO: set options based on creation options
+        heif_encoding_options *encoding_options = nullptr;
+
+        heif_image_handle *out_image_handle;
+
+        heif_context_encode_image(ctx, image, encoder, encoding_options,
+                                  &out_image_handle);
+
+        heif_image_release(image);
+
+        heif_image_handle_release(out_image_handle);
+        heif_encoding_options_free(encoding_options);
+    }
+
+    return {heif_error_Ok, heif_suberror_Unspecified, "Success"};
+}
+
 /************************************************************************/
 /*                             CreateCopy()                             */
 /************************************************************************/
@@ -147,13 +290,6 @@ GDALHEIFDataset::CreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int,
     if (pfnProgress == nullptr)
         pfnProgress = GDALDummyProgress;
 
-    int nBands = poSrcDS->GetRasterCount();
-    if ((nBands != 3) && (nBands != 4))
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Driver only supports source dataset with 3 or 4 bands.");
-        return nullptr;
-    }
     // TODO: more sanity checks
 
     heif_context *ctx = heif_context_alloc();
@@ -172,82 +308,27 @@ GDALHEIFDataset::CreateCopy(const char *pszFilename, GDALDataset *poSrcDS, int,
 
     setEncoderParameters(encoder, papszOptions);
 
-    heif_image *image;
-
-    err =
-        heif_image_create(poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
-                          heif_colorspace_RGB, heif_chroma_444, &image);
+    int nBands = poSrcDS->GetRasterCount();
+    switch (nBands)
+    {
+        case 0:
+        case 1:
+        case 2:
+            return nullptr;
+        case 3:
+        case 4:
+            err = encodeRGBImage(poSrcDS, ctx, encoder);
+            break;
+        default:
+            err = encodeEachBandAsGray(poSrcDS, ctx, encoder);
+            break;  //TODO:
+    }
     if (err.code)
     {
-        heif_encoder_release(encoder);
-        heif_context_free(ctx);
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Failed to create libheif input image.\n");
         return nullptr;
     }
 
-    for (auto &&poBand : poSrcDS->GetBands())
-    {
-        if (poBand->GetRasterDataType() != GDT_Byte)
-        {
-            heif_image_release(image);
-            heif_encoder_release(encoder);
-            heif_context_free(ctx);
-            CPLError(CE_Failure, CPLE_AppDefined, "Unsupported data type.");
-            return nullptr;
-        }
-        heif_channel channel;
-        auto mapError =
-            mapColourInterpretation(poBand->GetColorInterpretation(), &channel);
-        if (mapError != CE_None)
-        {
-            heif_image_release(image);
-            heif_encoder_release(encoder);
-            heif_context_free(ctx);
-            CPLError(CE_Failure, CPLE_NotSupported,
-                     "Driver does not support bands other than RGBA yet.");
-            return nullptr;
-        }
-        err = heif_image_add_plane(image, channel, poSrcDS->GetRasterXSize(),
-                                   poSrcDS->GetRasterYSize(), 8);
-        if (err.code)
-        {
-            heif_image_release(image);
-            heif_encoder_release(encoder);
-            heif_context_free(ctx);
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Failed to add image plane to libheif input image.");
-            return nullptr;
-        }
-        int stride;
-        uint8_t *p = heif_image_get_plane(image, channel, &stride);
-        auto eErr = poBand->RasterIO(
-            GF_Read, 0, 0, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
-            p, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(), GDT_Byte,
-            0, stride, nullptr);
-
-        if (eErr != CE_None)
-        {
-            heif_image_release(image);
-            heif_encoder_release(encoder);
-            heif_context_free(ctx);
-            return nullptr;
-        }
-    }
-
-    // TODO: set options based on creation options
-    heif_encoding_options *encoding_options = nullptr;
-
-    heif_image_handle *out_image_handle;
-
-    heif_context_encode_image(ctx, image, encoder, encoding_options,
-                              &out_image_handle);
-
-    heif_image_release(image);
-
     // TODO: set properties on output image
-    heif_image_handle_release(out_image_handle);
-    heif_encoding_options_free(encoding_options);
     heif_encoder_release(encoder);
 
     VSILFILE *fp = VSIFOpenL(pszFilename, "wb");
